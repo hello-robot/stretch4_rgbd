@@ -12,7 +12,7 @@ class FastEmulatedRGBDStreamer:
     A low-latency, temporally synchronized emulated RGB-D streamer.
     
     FRAME RATE & PERFORMANCE OPTIMIZATIONS:
-    Achieving a consistent 10Hz output required completely bypassing the heavier `stretch_body_ii` 
+    Achieving a consistent 10Hz output required completely bypassing the heavier `stretch4_body` 
     pipeline which introduces overhead through multiple message passing and synchronization layers.
     
     1. Direct Hardware Access: This class pulls raw, temporally-stamped frames directly from the 
@@ -37,7 +37,7 @@ class FastEmulatedRGBDStreamer:
             raise RuntimeError("HELLO_FLEET_PATH or HELLO_FLEET_ID environment variables are missing.")
 
         # Load LiDAR calibration
-        from stretch_body_ii.subsystem.cameras.calibrate_extrinsics_lidars import DualLidarCalibration
+        from stretch4_body.subsystem.cameras.calibrate_extrinsics_lidars import DualLidarCalibration
         self.lidar_calib = DualLidarCalibration()
         self.T_lidar_to_base_left = self.lidar_calib.get_lidar_to_base_transform(is_right_lidar=False)
 

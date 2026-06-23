@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from stretch4_emulated_rgbd.api import get_emulated_rgbd_stream
 from stretch4_emulated_rgbd.shared_utils import get_arg_parser, ExtrinsicsCalibration
 from stretch4_emulated_rgbd import rgbd_networking as gn
-import stretch_body_ii.robot.robot_client as rc
+import stretch4_body.robot.robot_client as rc
 
 class RobotStatePoller:
     def __init__(self, robot):

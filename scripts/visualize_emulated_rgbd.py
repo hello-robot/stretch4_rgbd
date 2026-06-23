@@ -11,7 +11,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
-    from stretch_body_ii.subsystem.cameras.emulated_rgbd import (
+    from stretch4_body.subsystem.cameras.emulated_rgbd import (
         stream_left_rgbd,
         stream_right_rgbd,
         stream_center_rgbd,
