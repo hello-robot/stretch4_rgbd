@@ -2,7 +2,7 @@ import time
 import threading
 import collections
 try:
-    from stretch_hesai_python.stream_lidar import stream_lidar_left_blocking
+    from stretch4_pyhesai_wrapper.stream_lidar import stream_lidar_left_blocking
 except ImportError:
     stream_lidar_left_blocking = None
 
