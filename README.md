@@ -34,7 +34,7 @@ Tools to optimize the rigid-body alignment between an RGB camera and a LiDAR sen
   - [Mathematical Interpretation and Application](#mathematical-interpretation-and-application)
 
 ## Installation
-Many of the optimization and visualization components of this repository can be run on a desktop computer without installing the `stretch_body_ii` package. 
+Many of the optimization and visualization components of this repository can be run on a desktop computer without installing the `stretch4_body` package. 
 
 ### Option 1: Standard Pip Installation
 If you already manage your own virtual environments (e.g., via `conda`, `venv`, or `pyenv`), you can install the package directly using `pip`. This will automatically install the package and its minimal dependencies as defined in `setup.py`:
@@ -43,7 +43,7 @@ If you already manage your own virtual environments (e.g., via `conda`, `venv`, 
 pip install -e .
 ```
 
-> **Note for On-Robot Usage:** If you are running this on the Stretch 4 robot to capture data, the script requires the `stretch_body_ii` system package. Make sure to create your virtual environment with the `--system-site-packages` flag (e.g., `python3 -m venv --system-site-packages venv`) so it can access system-level dependencies.
+> **Note for On-Robot Usage:** If you are running this on the Stretch 4 robot to capture data, the script requires the `stretch4_body` system package. Make sure to create your virtual environment with the `--system-site-packages` flag (e.g., `python3 -m venv --system-site-packages venv`) so it can access system-level dependencies.
 
 ### Option 2: Automated Install Script
 Alternatively, to automatically create a new isolated virtual environment and install the minimal set of dependencies into it, run the provided install script. This script automatically uses the `--system-site-packages` flag, making it ideal for both desktop and on-robot usage:
@@ -69,7 +69,7 @@ Run the script, position the robot to a view you want to capture, and then press
 ```bash
 python3 scripts/capture_emulated_rgbd.py --camera left --lidar left
 ```
-*(Note: This must be run on the Stretch 4 robot. It requires `stretch_body_ii` and the use of the robot's cameras and LiDARs)*
+*(Note: This must be run on the Stretch 4 robot. It requires `stretch4_body` and the use of the robot's cameras and LiDARs)*
 
 ### 2. Preprocessing
 Before optimizing, ensure you have computed the static validity masks for the sensors:
@@ -350,7 +350,7 @@ Maintaining low latency and strict temporal synchronization between the instanta
 3. **Global Shutter & Sweep Midpoint Synchronization**: The synchronization logic mathematically matches the instantaneous RGB timestamp with the temporal *midpoint* of the LiDAR sweep (calculated from the first and last point timestamps). This perfectly balances the temporal error across the 100ms rotation window, ensuring that moving objects in the center of the RGB image map tightly to the corresponding LiDAR points.
 
 ### High-Frequency Pipeline Methods
-To achieve and stabilize the 10Hz target without CPU or USB bottlenecking, the default `stretch_body_ii` pipeline was heavily refactored into the low-latency `FastEmulatedRGBDStreamer` and `HeadCamera` classes:
+To achieve and stabilize the 10Hz target without CPU or USB bottlenecking, the default `stretch4_body` pipeline was heavily refactored into the low-latency `FastEmulatedRGBDStreamer` and `HeadCamera` classes:
 
 1. **Direct Hardware Access & Zero-Copy Structuring**: The overhead of inter-process message passing and excessive buffering was removed. Data is polled directly from the sensor drivers into a tight Python generator loop.
 2. **Non-Blocking Queues & Memory Pools**: The Luxonis OAK-FFC DepthAI pipeline is configured with strictly bounded memory pools (`setNumFramesPools=2`) and a non-blocking output queue (`maxSize=1`). If the host CPU stalls, the camera driver instantly overwrites the oldest frame rather than queuing it, guaranteeing the host *always* pulls the absolute freshest physical frame.
