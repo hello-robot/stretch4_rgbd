@@ -131,7 +131,7 @@ python3 scripts/estimate_validity_masks.py --camera left --lidar left
 To visualize captured or live data streams run:
 
 ```bash
-python3 scripts/visualize_emulated_rgbd.py
+python3 scripts/visualize_emulated_rgbd.py --camera left --lidar left
 ```
 
 ## API Usage and Reference
