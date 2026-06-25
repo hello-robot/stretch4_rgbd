@@ -82,14 +82,6 @@ class RobotStatePoller:
                     'angle': wrist_roll.get('pos', 0.0), 
                     'effort': wrist_roll.get('effort', 0.0)
                 },
-                'head_pan': {
-                    'angle': head_pan.get('pos', 0.0),
-                    'effort': head_pan.get('effort', 0.0)
-                },
-                'head_tilt': {
-                    'angle': head_tilt.get('pos', 0.0),
-                    'effort': head_tilt.get('effort', 0.0)
-                },
                 'base_odometry': {
                     'x': base.get('x', 0.0), 
                     'y': base.get('y', 0.0), 
