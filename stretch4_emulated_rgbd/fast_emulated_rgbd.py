@@ -56,7 +56,12 @@ class FastEmulatedRGBDStreamer:
         # Determine the center camera's position relative to the base using the right LiDAR (this is the factory convention)
         self.T_base_to_center = np.eye(4)
         key = "transform_right_lidar_to_head_center"
-        T_l_to_c = np.array(self.camera_extrinsics[key]["data"])
+        try:
+            T_l_to_c = np.array(self.camera_extrinsics[key]["data"])
+        except KeyError as e:
+            print(f"Key {key} not found in camera_extrinsics.yaml")
+            print(f"Please run REx_camera_calibrate.")
+            raise e
         T_base_to_right_lidar = self.lidar_calib.get_lidar_to_base_transform(is_right_lidar=True)
         self.T_base_to_center = T_l_to_c @ np.linalg.inv(T_base_to_right_lidar)
 
