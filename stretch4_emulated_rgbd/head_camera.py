@@ -221,9 +221,10 @@ class HeadCamera:
                 print(f"Warning: could not read factory calibration from OAK-FFC: {e}. Falling back to fleet calibration.")
                 
                 try:
-                    from stretch_body_ii.subsystem.cameras.models.camera_calibration import RGBCameraCalibration
+                    from stretch4_body.subsystem.cameras.models.camera_calibration import RGBCameraCalibration
+                    from stretch4_body.subsystem.cameras import RGBCameras
                     fleet_calib = RGBCameraCalibration.load_calibration_from_fleet_path(
-                        camera_name=camera_name, is_flip_width_and_height=False
+                        camera_type=RGBCameras[camera_name], is_flip_width_and_height=False
                     )
                     if fleet_calib and fleet_calib.camera_matrix is not None:
                         M = np.array(fleet_calib.camera_matrix, dtype=np.float64)

@@ -15,7 +15,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from stretch4_emulated_rgbd.api import get_emulated_rgbd_stream
 from stretch4_emulated_rgbd.shared_utils import get_arg_parser, ExtrinsicsCalibration
 from stretch4_emulated_rgbd import rgbd_networking as gn
-import stretch_body_ii.robot.robot_client as rc
+import stretch4_body.robot.robot_client as rc
 
 class RobotStatePoller:
     def __init__(self, robot):
@@ -81,14 +81,6 @@ class RobotStatePoller:
                 'wrist_roll': {
                     'angle': wrist_roll.get('pos', 0.0), 
                     'effort': wrist_roll.get('effort', 0.0)
-                },
-                'head_pan': {
-                    'angle': head_pan.get('pos', 0.0),
-                    'effort': head_pan.get('effort', 0.0)
-                },
-                'head_tilt': {
-                    'angle': head_tilt.get('pos', 0.0),
-                    'effort': head_tilt.get('effort', 0.0)
                 },
                 'base_odometry': {
                     'x': base.get('x', 0.0), 

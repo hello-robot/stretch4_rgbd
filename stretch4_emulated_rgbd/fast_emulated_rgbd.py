@@ -12,7 +12,7 @@ class FastEmulatedRGBDStreamer:
     A low-latency, temporally synchronized emulated RGB-D streamer.
     
     FRAME RATE & PERFORMANCE OPTIMIZATIONS:
-    Achieving a consistent 10Hz output required completely bypassing the heavier `stretch_body_ii` 
+    Achieving a consistent 10Hz output required completely bypassing the heavier `stretch4_body` 
     pipeline which introduces overhead through multiple message passing and synchronization layers.
     
     1. Direct Hardware Access: This class pulls raw, temporally-stamped frames directly from the 
@@ -37,7 +37,7 @@ class FastEmulatedRGBDStreamer:
             raise RuntimeError("HELLO_FLEET_PATH or HELLO_FLEET_ID environment variables are missing.")
 
         # Load LiDAR calibration
-        from stretch_body_ii.subsystem.cameras.calibrate_extrinsics_lidars import DualLidarCalibration
+        from stretch4_body.subsystem.cameras.calibrate_extrinsics_lidars import DualLidarCalibration
         self.lidar_calib = DualLidarCalibration()
         self.T_lidar_to_base_left = self.lidar_calib.get_lidar_to_base_transform(is_right_lidar=False)
 
@@ -56,10 +56,14 @@ class FastEmulatedRGBDStreamer:
         # Determine the center camera's position relative to the base using the right LiDAR (this is the factory convention)
         self.T_base_to_center = np.eye(4)
         key = "transform_right_lidar_to_head_center"
-        if key in self.lidar_calib.data:
-            T_l_to_c = np.array(self.lidar_calib.data[key]["data"])
-            T_base_to_right_lidar = self.lidar_calib.get_lidar_to_base_transform(is_right_lidar=True)
-            self.T_base_to_center = T_l_to_c @ np.linalg.inv(T_base_to_right_lidar)
+        try:
+            T_l_to_c = np.array(self.camera_extrinsics[key]["data"])
+        except KeyError as e:
+            print(f"Key {key} not found in camera_extrinsics.yaml")
+            print(f"Please run REx_camera_calibrate.")
+            raise e
+        T_base_to_right_lidar = self.lidar_calib.get_lidar_to_base_transform(is_right_lidar=True)
+        self.T_base_to_center = T_l_to_c @ np.linalg.inv(T_base_to_right_lidar)
 
         self.T_base_to_cam = {
             "left": np.linalg.inv(self.T_left_to_center) @ self.T_base_to_center,

@@ -14,7 +14,7 @@ except ImportError:
 from stretch4_emulated_rgbd import emulated_rgbd_config as config
 
 try:
-    from stretch_body_ii.subsystem.cameras.emulated_rgbd import (
+    from stretch4_body.subsystem.cameras.emulated_rgbd import (
         stream_left_rgbd,
         stream_right_rgbd,
         stream_center_rgbd,
@@ -72,7 +72,7 @@ def get_emulated_rgbd_stream(
     """
     Unified entry point to stream synchronized RGB-D frames from Stretch 4.
     Automatically selects the FastEmulatedRGBDStreamer if only the left camera and 
-    left LiDAR are requested. Otherwise falls back to the standard stretch_body_ii streamer.
+    left LiDAR are requested. Otherwise falls back to the standard stretch4_body streamer.
     
     Returns:
         (streamer, generator): The streamer instance and the generator yielding RGBDFrames.
@@ -98,7 +98,7 @@ def get_emulated_rgbd_stream(
         return streamer, streamer.stream_left_rgbd()
 
     if not HAS_STRETCH_BODY:
-        raise RuntimeError("stretch_body_ii is not installed. Live streaming fallback is not available. Try selecting only left camera and left lidar.")
+        raise RuntimeError("stretch4_body is not installed. Live streaming fallback is not available. Try selecting only left camera and left lidar.")
 
     streamer = EmulatedRGBDStreamer.get_instance(use_left_lidar=use_left_lidar, use_right_lidar=use_right_lidar)
     

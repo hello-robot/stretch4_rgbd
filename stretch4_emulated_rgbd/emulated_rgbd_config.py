@@ -6,8 +6,8 @@ This configuration file is intended to hold the key parameters relevant to emula
 # GENERAL CONFIGURATION
 # ==============================================================================
 
-# If True, enables the legacy stretch_body_ii emulated RGB-D streamer fallback.
-# If False, disables stretch_body_ii and restricts the streamer to only the 
+# If True, enables the legacy stretch4_body emulated RGB-D streamer fallback.
+# If False, disables stretch4_body and restricts the streamer to only the 
 # FastEmulatedRGBDStreamer (requires use_left=True, use_left_lidar=True).
 USE_STRETCH_BODY_EMULATED_RGBD = False
 
