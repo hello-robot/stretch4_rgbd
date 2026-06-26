@@ -20,7 +20,7 @@ try:
         EmulatedRGBDStreamer,
     )
     HAS_STRETCH_BODY = True
-except ImportError:
+except (ImportError, KeyError):
     HAS_STRETCH_BODY = False
 
 from stretch4_emulated_rgbd.shared_utils import get_arg_parser, reconstruct_rgbd_frame, LoopTimer
