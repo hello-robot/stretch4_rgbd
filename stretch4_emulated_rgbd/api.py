@@ -23,7 +23,7 @@ try:
         EmulatedRGBDStreamer,
     )
     HAS_STRETCH_BODY = config.USE_STRETCH_BODY_EMULATED_RGBD
-except ImportError:
+except (ImportError, KeyError):
     HAS_STRETCH_BODY = False
 
 from stretch4_emulated_rgbd.shared_utils import (
