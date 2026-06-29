@@ -56,9 +56,6 @@ class RobotStatePoller:
             wrist_pitch = eoa.get('wrist_pitch', {})
             wrist_roll = eoa.get('wrist_roll', {})
             
-            head_pan = st.get('head_pan', {})
-            head_tilt = st.get('head_tilt', {})
-
             data = {
                 'gripper': {
                     'pos_pct': gripper_st.get('pos_pct', 0.0), 

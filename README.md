@@ -164,6 +164,40 @@ For the right camera/lidar:
 python3 scripts/visualize_emulated_rgbd.py --camera right --lidar right
 ```
 
+### 10. Use PyZMQ to Send RGB-D Imagery
+
+There are two examples of sending RGB-D images via PyZMQ. They can be used to send RGB-D images from the robot to a desktop computer or between processes on the same computer.
+
+The first example sends RGB-D images, receives them, and then visualizes them using OpenCV. 
+
+To run the publisher:
+```bash
+python3 scripts/send_rgbd_images.py --camera left --lidar left
+```
+
+To run the subscriber:
+```bash
+python3 scripts/recv_rgbd_images.py
+```
+
+The second example send RGB-D images with the synchronized joint state of the robot, receives them, and then visualizes the colored 3D point cloud in Rerun along with the joint states.
+
+To run the publisher:
+```bash
+python3 scripts/send_rgbd_images_and_joint_states.py --camera left --lidar left
+```
+
+To run the subscriber:
+```bash
+python3 scripts/recv_rgbd_images_and_joint_states.py
+```
+
+Both examples can send data over the network. To do so, you will need to use the `--remote` flag for both the publisher and the subscriber and provide IP and port information. Sending RGB-D images with joint states uses the following file for IP and port information:
+
+```stretch4_rgbd/stretch4_emulated_rgbd/rgbd_networking.py```
+
+The example code for sending RGB-D images alone uses IP and port information provided as command line arguments. 
+
 ## API Usage and Reference
 
 For developers writing custom applications, the repository provides a unified API in `stretch4_emulated_rgbd.api` to stream and process synchronized RGB-D frames.
@@ -294,10 +328,6 @@ rr.init("Stretch API Example", spawn=True)
 # dense depth (if computed via DenseDepthImage), and 3D point cloud overlays
 visualize_rgbd_frame("left", frame, vig_mask=vig_mask, depth_mask=depth_mask)
 ```
-
-We also provide two examples demonstrating transmitting the tightly-synchronized `RGBDFrame` generator over a PyZMQ network socket:
-- **Publisher**: `python3 examples/send_rgbd_images.py`
-- **Subscriber**: `python3 examples/recv_rgbd_images.py`
 
 ## Configuration (`emulated_rgbd_config.py`)
 
