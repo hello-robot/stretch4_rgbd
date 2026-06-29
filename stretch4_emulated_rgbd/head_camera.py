@@ -185,7 +185,7 @@ class HeadCamera:
             self.manip.inputImage.setBlocking(False)
             self.manip.inputImage.setMaxSize(1)
             
-            self.out_left.link(self.manip.inputImage)
+            self.out_node.link(self.manip.inputImage)
             source_for_next_stage = self.manip.out
 
         if self.compress:
