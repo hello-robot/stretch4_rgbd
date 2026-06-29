@@ -53,10 +53,11 @@ def estimate_masks(args):
             
             # frame_data could be a single frame or a synced_frame
             frames = []
-            if hasattr(frame_data, "left") and frame_data.left: frames.append(frame_data.left)
-            elif hasattr(frame_data, "right") and frame_data.right: frames.append(frame_data.right)
-            elif hasattr(frame_data, "center") and frame_data.center: frames.append(frame_data.center)
-            elif not hasattr(frame_data, "left") and not hasattr(frame_data, "right") and not hasattr(frame_data, "center"):
+            if hasattr(frame_data, "left") or hasattr(frame_data, "right") or hasattr(frame_data, "center"):
+                if hasattr(frame_data, "left") and frame_data.left: frames.append(frame_data.left)
+                if hasattr(frame_data, "right") and frame_data.right: frames.append(frame_data.right)
+                if getattr(frame_data, "center", None) is not None: frames.append(frame_data.center)
+            else:
                 frames.append(frame_data)
                 
             done = True

@@ -2,9 +2,10 @@ import time
 import threading
 import collections
 try:
-    from pyhesai_wrapper.stream_lidar import stream_lidar_left_blocking
+    from pyhesai_wrapper.stream_lidar import stream_lidar_left_blocking, stream_lidar_right_blocking
 except ImportError:
     stream_lidar_left_blocking = None
+    stream_lidar_right_blocking = None
 
 class LidarPoller:
     """
@@ -24,7 +25,8 @@ class LidarPoller:
        Fix: We dynamically estimate the stable transmission offset (`clock_offset`) to precisely 
        translate the LiDAR hardware time into host monotonic time.
     """
-    def __init__(self, history_size=100):
+    def __init__(self, lidar_name="left", history_size=100):
+        self.lidar_name = lidar_name
         self.history_size = history_size
         self.history_buffer = collections.deque(maxlen=self.history_size)
         self.lock = threading.Lock()
@@ -39,7 +41,17 @@ class LidarPoller:
 
     def _poll_loop(self):
         try:
-            for lidar_frame in stream_lidar_left_blocking():
+            if self.lidar_name == "left":
+                stream_fn = stream_lidar_left_blocking
+            elif self.lidar_name == "right":
+                stream_fn = stream_lidar_right_blocking
+            else:
+                raise ValueError(f"Unsupported lidar name: {self.lidar_name}")
+
+            if stream_fn is None:
+                raise ImportError(f"Lidar stream function for {self.lidar_name} is not available (ImportError).")
+
+            for lidar_frame in stream_fn():
                 if not self.running:
                     break
                 if lidar_frame is not None and hasattr(lidar_frame, 'timestamp') and len(lidar_frame.timestamp) > 0:
