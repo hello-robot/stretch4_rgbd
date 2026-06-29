@@ -101,8 +101,15 @@ python3 scripts/visualize_emulated_rgbd.py --data_path ./data/captured_emulated_
 
 ### 4. Optimize the Camera-LiDAR Extrinsics
 Run the core CMA-ES optimization to refine the 6D rigid body extrinsics representing the pose of the camera:
+
+For the left camera/lidar calibration:
 ```bash
-python3 scripts/optimize_extrinsics.py --data_path ./data/captured_emulated_rgbd_<timestamp>/
+python3 scripts/optimize_extrinsics.py --camera left --lidar left --data_path ./data/captured_emulated_rgbd_<timestamp>/ 
+```
+
+For the right camera/lidar calibration:
+```bash
+python3 scripts/optimize_extrinsics.py --camera right --lidar right --data_path ./data/captured_emulated_rgbd_<timestamp>/ 
 ```
 This script leverages Mutual Information (MI) to structurally align the edges of the projected LiDAR depth map with the visual edges in the RGB image. It does not optimize camera intrinsics. 
 
