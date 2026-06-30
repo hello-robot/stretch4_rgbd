@@ -28,7 +28,9 @@ class FastEmulatedRGBDStreamer:
        optimal frame from the camera's high-frequency (e.g. 30Hz) history buffer. This drops phase 
        misalignment error to ~16ms.
     """
-    def __init__(self, emulated_rgbd_fps=10, camera_fps=30, resolution_height=800, compress=True, oak_buffer_size=1, calibration: ExtrinsicsCalibration = None, ignore_prior_optimizations=False):
+    def __init__(self, camera="left", lidar="left", emulated_rgbd_fps=10, camera_fps=30, resolution_height=800, compress=True, oak_buffer_size=1, calibration: ExtrinsicsCalibration = None, ignore_prior_optimizations=False):
+        self.camera_name = camera
+        self.lidar_name = lidar
         self.emulated_rgbd_fps = emulated_rgbd_fps
         self.fleet_path = os.environ.get("HELLO_FLEET_PATH", "")
         self.fleet_id = os.environ.get("HELLO_FLEET_ID", "")
@@ -40,6 +42,7 @@ class FastEmulatedRGBDStreamer:
         from stretch4_body.subsystem.cameras.calibrate_extrinsics_lidars import DualLidarCalibration
         self.lidar_calib = DualLidarCalibration()
         self.T_lidar_to_base_left = self.lidar_calib.get_lidar_to_base_transform(is_right_lidar=False)
+        self.T_lidar_to_base_right = self.lidar_calib.get_lidar_to_base_transform(is_right_lidar=True)
 
         # Load camera extrinsics
         camera_extrinsics_path = os.path.join(
@@ -52,6 +55,7 @@ class FastEmulatedRGBDStreamer:
 
         # The head cameras are calibrated relative to the center camera
         self.T_left_to_center = np.array(self.camera_extrinsics.get("left_to_center", np.eye(4)))
+        self.T_right_to_center = np.array(self.camera_extrinsics.get("right_to_center", np.eye(4)))
         
         # Determine the center camera's position relative to the base using the right LiDAR (this is the factory convention)
         self.T_base_to_center = np.eye(4)
@@ -67,37 +71,42 @@ class FastEmulatedRGBDStreamer:
 
         self.T_base_to_cam = {
             "left": np.linalg.inv(self.T_left_to_center) @ self.T_base_to_center,
+            "right": np.linalg.inv(self.T_right_to_center) @ self.T_base_to_center,
         }
         
         # Save a copy of the factory baseline calibration
         self.T_base_to_cam_factory = {
-            "left": self.T_base_to_cam["left"].copy()
+            "left": self.T_base_to_cam["left"].copy(),
+            "right": self.T_base_to_cam["right"].copy(),
         }
         
         self.T_base_to_cam_optimized = None
 
         # Apply provided or default optimized calibration
         if calibration is None and not ignore_prior_optimizations:
-            default_calib_path = os.path.join(self.fleet_path, self.fleet_id, "calibration_cameras", "emulated_rgbd_extrinsics_left_camera_left_lidar.yaml")
+            default_calib_path = os.path.join(
+                self.fleet_path,
+                self.fleet_id,
+                "calibration_cameras",
+                f"emulated_rgbd_extrinsics_{self.camera_name}_camera_{self.lidar_name}_lidar.yaml"
+            )
             if os.path.exists(default_calib_path):
                 print(f"Loading automatic optimized Emulated RGB-D calibration from {default_calib_path}")
                 calibration = ExtrinsicsCalibration.load_from_yaml(default_calib_path)
                 
         if calibration is not None:
-            self.T_base_to_cam["left"] = calibration.apply_to_camera_extrinsics(self.T_base_to_cam["left"])
+            self.T_base_to_cam[self.camera_name] = calibration.apply_to_camera_extrinsics(self.T_base_to_cam[self.camera_name])
             self.T_base_to_cam_optimized = {
-                "left": self.T_base_to_cam["left"].copy()
+                self.camera_name: self.T_base_to_cam[self.camera_name].copy()
             }
 
-
-
         # Create calibs property equivalent to EmulatedRGBDStreamer for easy drop-in compatibility
-        self.calibs = {"left": self}
+        self.calibs = {self.camera_name: self}
         self.latest_lidar_pts = {}
 
         # Initialize the hardware wrappers
-        self.camera = HeadCamera(fps=camera_fps, resolution_height=resolution_height, compress=compress, oak_buffer_size=oak_buffer_size)
-        self.lidar_poller = LidarPoller()
+        self.camera = HeadCamera(camera_name=self.camera_name, fps=camera_fps, resolution_height=resolution_height, compress=compress, oak_buffer_size=oak_buffer_size)
+        self.lidar_poller = LidarPoller(lidar_name=self.lidar_name)
         
         self.camera.start()
         self.camera_matrix, self.distortion_coefficients = self.camera.get_intrinsics()
@@ -106,7 +115,11 @@ class FastEmulatedRGBDStreamer:
         self.is_fisheye = True
 
     def stream_left_rgbd(self):
-        """Generator that yields low-latency, synchronized left RGBD frames."""
+        """Legacy wrapper that yields left RGBD frames (uses stream_rgbd)."""
+        return self.stream_rgbd()
+
+    def stream_rgbd(self):
+        """Generator that yields low-latency, synchronized RGBD frames."""
         try:
             target_interval = 1.0 / self.emulated_rgbd_fps
             last_yield_time = 0
@@ -120,7 +133,7 @@ class FastEmulatedRGBDStreamer:
                 last_mid_ts = mid_ts
                 
                 if lidar_frame is not None:
-                    self.latest_lidar_pts["left"] = lidar_frame.points
+                    self.latest_lidar_pts[self.lidar_name] = lidar_frame.points
 
                 
                 # Enforce output frame rate restraint (e.g. drop frames to hit 5Hz)
@@ -142,26 +155,27 @@ class FastEmulatedRGBDStreamer:
                     yield RGBDFrame(
                         timestamp=rgb_timestamp,
                         image_frame=image_frame,
-                        camera_type="left",
+                        camera_type=self.camera_name,
                         point_cloud=np.zeros((0, 3)),
                         point_cloud_base=np.zeros((0, 3)),
                         point_colors=np.zeros((0, 3)),
                         depth_image=np.zeros(rgb_img.shape[:2], dtype=np.float32),
                         robot_id=self.fleet_id,
                         timestamp_image=rgb_timestamp,
-                        timestamp_lidar_left=lidar_frame.timestamp if lidar_frame else None,
-                        timestamp_lidar_right=None,
-                        lidars_used="left_lidar"
+                        timestamp_lidar_left=lidar_frame.timestamp if (lidar_frame and self.lidar_name == "left") else None,
+                        timestamp_lidar_right=lidar_frame.timestamp if (lidar_frame and self.lidar_name == "right") else None,
+                        lidars_used=f"{self.lidar_name}_lidar"
                     )
                     continue
 
-                # Process point cloud from Left LiDAR (LiDAR Frame -> Base Frame)
+                # Process point cloud from LiDAR (LiDAR Frame -> Base Frame)
                 ones = np.ones((len(lidar_frame.points), 1))
-                pts_base = (self.T_lidar_to_base_left @ np.hstack([lidar_frame.points, ones]).T).T[:, :3]
+                T_lidar_to_base = self.T_lidar_to_base_left if self.lidar_name == "left" else self.T_lidar_to_base_right
+                pts_base = (T_lidar_to_base @ np.hstack([lidar_frame.points, ones]).T).T[:, :3]
 
                 # Transform to Camera Frame
-                T_base_to_left_cam = self.T_base_to_cam["left"]
-                pts_cam_all = (T_base_to_left_cam @ np.hstack([pts_base, ones]).T).T[:, :3]
+                T_base_to_cam = self.T_base_to_cam[self.camera_name]
+                pts_cam_all = (T_base_to_cam @ np.hstack([pts_base, ones]).T).T[:, :3]
 
                 # Filter points behind camera
                 valid_idx = pts_cam_all[:, 2] > 0
@@ -226,21 +240,21 @@ class FastEmulatedRGBDStreamer:
                 yield RGBDFrame(
                     timestamp=rgb_timestamp,
                     image_frame=image_frame,
-                    camera_type="left",
+                    camera_type=self.camera_name,
                     point_cloud=pts_cam,
                     point_cloud_base=pts_world,
                     point_colors=cols,
                     depth_image=depth_img,
                     camera_matrix=self.camera_matrix,
                     distortion_coefficients=self.distortion_coefficients,
-                    T_base_to_cam=self.T_base_to_cam["left"],
-                    T_lidar_to_base_left=self.T_lidar_to_base_left,
-                    T_lidar_to_base_right=None,
+                    T_base_to_cam=self.T_base_to_cam[self.camera_name],
+                    T_lidar_to_base_left=self.T_lidar_to_base_left if self.lidar_name == "left" else None,
+                    T_lidar_to_base_right=self.T_lidar_to_base_right if self.lidar_name == "right" else None,
                     robot_id=self.fleet_id,
                     timestamp_image=rgb_timestamp,
-                    timestamp_lidar_left=lidar_frame.timestamp if lidar_frame else None,
-                    timestamp_lidar_right=None,
-                    lidars_used="left_lidar"
+                    timestamp_lidar_left=lidar_frame.timestamp if (lidar_frame and self.lidar_name == "left") else None,
+                    timestamp_lidar_right=lidar_frame.timestamp if (lidar_frame and self.lidar_name == "right") else None,
+                    lidars_used=f"{self.lidar_name}_lidar"
                 )
         except GeneratorExit:
             pass

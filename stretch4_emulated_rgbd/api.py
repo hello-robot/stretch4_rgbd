@@ -83,10 +83,17 @@ def get_emulated_rgbd_stream(
         use_left_lidar = True
         use_right_lidar = True
 
-    # Use fast streamer for the optimal case
-    if use_left and not use_right and not use_center and not use_left_right and not use_left_right_center and use_left_lidar and not use_right_lidar:
+    # Use fast streamer for the optimal cases: left camera + left lidar, OR right camera + right lidar
+    is_left_only = use_left and not use_right and not use_center and not use_left_right and not use_left_right_center and use_left_lidar and not use_right_lidar
+    is_right_only = use_right and not use_left and not use_center and not use_left_right and not use_left_right_center and use_right_lidar and not use_left_lidar
+
+    if is_left_only or is_right_only:
+        camera_name = "left" if is_left_only else "right"
+        lidar_name = "left" if is_left_only else "right"
         from stretch4_emulated_rgbd.fast_emulated_rgbd import FastEmulatedRGBDStreamer
         streamer = FastEmulatedRGBDStreamer(
+            camera=camera_name,
+            lidar=lidar_name,
             emulated_rgbd_fps=emulated_rgbd_fps, 
             camera_fps=camera_fps,
             resolution_height=resolution_height, 
@@ -95,7 +102,7 @@ def get_emulated_rgbd_stream(
             calibration=calibration,
             ignore_prior_optimizations=ignore_prior_optimizations
         )
-        return streamer, streamer.stream_left_rgbd()
+        return streamer, streamer.stream_rgbd()
 
     if not HAS_STRETCH_BODY:
         raise RuntimeError("stretch4_body is not installed. Live streaming fallback is not available. Try selecting only left camera and left lidar.")

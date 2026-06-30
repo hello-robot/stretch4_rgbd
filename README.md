@@ -60,14 +60,20 @@ source venv/bin/activate
 ## Usage
 
 ### 1. Data Capture
-To capture raw data for alignment from the robot, use the following script. Currently only the left fisheye camera and left LiDAR have been tested using three RGB-D images consisting of different views of a static office space. Specifically, the robot was rotated in place to see different parts of the office. 
+To capture raw data for alignment from the robot, use the following script. The system supports calibration of either the left or right camera and LiDAR combinations.
 
 *(Note: It's important to capture images of a static scene. For better results, the images should include foreground objects with prominent depth edges across the RGB camera's field of view).*
 
 Run the script, position the robot to a view you want to capture, and then press the space bar to capture the view for calibration. Repeat this process to acquire at least two more views and then press 'Q' to quit.
 
+To capture using the left camera and left LiDAR:
 ```bash
 python3 scripts/capture_emulated_rgbd.py --camera left --lidar left
+```
+
+To capture using the right camera and right LiDAR:
+```bash
+python3 scripts/capture_emulated_rgbd.py --camera right --lidar right
 ```
 *(Note: This must be run on the Stretch 4 robot. It requires `stretch4_body` and the use of the robot's cameras and LiDARs)*
 
@@ -95,8 +101,15 @@ python3 scripts/visualize_emulated_rgbd.py --data_path ./data/captured_emulated_
 
 ### 4. Optimize the Camera-LiDAR Extrinsics
 Run the core CMA-ES optimization to refine the 6D rigid body extrinsics representing the pose of the camera:
+
+For the left camera/lidar calibration:
 ```bash
-python3 scripts/optimize_extrinsics.py --data_path ./data/captured_emulated_rgbd_<timestamp>/
+python3 scripts/optimize_extrinsics.py --camera left --lidar left --data_path ./data/captured_emulated_rgbd_<timestamp>/ 
+```
+
+For the right camera/lidar calibration:
+```bash
+python3 scripts/optimize_extrinsics.py --camera right --lidar right --data_path ./data/captured_emulated_rgbd_<timestamp>/ 
 ```
 This script leverages Mutual Information (MI) to structurally align the edges of the projected LiDAR depth map with the visual edges in the RGB image. It does not optimize camera intrinsics. 
 
@@ -104,35 +117,86 @@ Using the `--visualize` command line argument will visualize the optimizations p
 
 ### 5. Visualize the Optimization Results
 
-Now, run the following script to visualize the results of the calibration. The left Rerun panel shows the captured data before calibration and the right panel shows the data after calibration. By hiding the sparse depth overlay and then repeatedly hiding and revealingthe the dense depth image overlay on top of the RGB image, you can assess the spatial alignment between the dense depth image and the RGB image.
+Now, run the following script to visualize the results of the calibration. The left Rerun panel shows the captured data before calibration and the right panel shows the data after calibration.
 
+For the left camera/lidar calibration:
 ```bash
 python3 scripts/visualize_optimized_rgbd.py --data_path ./data/captured_emulated_rgbd_<timestamp>/ --opt_yaml ./data/captured_emulated_rgbd_<timestamp>/optimization_results_mi_rgb_left_camera_left_<calibration_timestamp>.yaml
+```
+
+For the right camera/lidar calibration:
+```bash
+python3 scripts/visualize_optimized_rgbd.py --data_path ./data/captured_emulated_rgbd_<timestamp>/ --opt_yaml ./data/captured_emulated_rgbd_<timestamp>/optimization_results_mi_rgb_right_camera_right_<calibration_timestamp>.yaml
 ```
 *(Note: The visualization will first have you review the validity masks using OpenCV windows. Click on a window and press 'y' to approve.)*
 
 ### 6. Installation of Optimized Calibrations (On Robot)
 Once you are satisfied with the calibration, you can install the resulting YAML file as the robot's default calibration. The provided helper script checks for fleet mismatches (i.e. capturing data on one robot and installing on another) and prevents accidental downgrading to older calibrations.
 ```bash
-python3 scripts/install_optimized_calibration.py ./data/captured_emulated_rgbd_<timestamp>/optimization_results_mi_rgb_<calibration_timestamp>.yaml
+python3 scripts/install_optimized_calibration.py ./data/captured_emulated_rgbd_<timestamp>/optimization_results_mi_rgb_<camera_name>_camera_<lidar_name>_<calibration_timestamp>.yaml
 ```
 Once installed, the `FastEmulatedRGBDStreamer` and `rgbd_rtmo_pose_estimation.py` will automatically load and apply this optimized calibration.
 
 ### 7. Validity Mask Estimation (On Robot)
 After optimizing the extrinsics and installing them, new physical validity masks should be estimated directly on the robot using the optimized calibration. This step dynamically calculates masks that zero out invalid RGB pixels caused by hardware vignetting and prevents the interpolation of the dense depth map from bleeding into regions with no physical LiDAR coverage.
 
-To capture the live frames and estimate the masks, run the following script on the robot:
+To capture the live frames and estimate the masks for the left sensor pair:
 ```bash
 python3 scripts/estimate_validity_masks.py --camera left --lidar left
+```
+
+To capture the live frames and estimate the masks for the right sensor pair:
+```bash
+python3 scripts/estimate_validity_masks.py --camera right --lidar right
 ```
 *(Note: This must be run on the Stretch 4 robot. The script captures exactly 30 synchronized frames, computes the masks at the highest active resolution, and saves them locally to `data/validity_masks/` for the visualizers to use automatically).*
 
 ### 8. Visualize Live RGB-D Imagery with the New Calibration (On Robot)
 To visualize captured or live data streams run:
 
+For the left camera/lidar:
 ```bash
 python3 scripts/visualize_emulated_rgbd.py --camera left --lidar left
 ```
+
+For the right camera/lidar:
+```bash
+python3 scripts/visualize_emulated_rgbd.py --camera right --lidar right
+```
+
+### 10. Use PyZMQ to Send RGB-D Imagery
+
+There are two examples of sending RGB-D images via PyZMQ. They can be used to send RGB-D images from the robot to a desktop computer or between processes on the same computer.
+
+The first example sends RGB-D images, receives them, and then visualizes them using OpenCV. 
+
+To run the publisher:
+```bash
+python3 scripts/send_rgbd_images.py --camera left --lidar left
+```
+
+To run the subscriber:
+```bash
+python3 scripts/recv_rgbd_images.py
+```
+
+The second example send RGB-D images with the synchronized joint state of the robot, receives them, and then visualizes the colored 3D point cloud in Rerun along with the joint states.
+
+To run the publisher:
+```bash
+python3 scripts/send_rgbd_images_and_joint_states.py --camera left --lidar left
+```
+
+To run the subscriber:
+```bash
+python3 scripts/recv_rgbd_images_and_joint_states.py
+```
+
+Both examples can send data over the network. To do so, you will need to use the `--remote` flag for both the publisher and the subscriber and provide IP and port information. Sending RGB-D images with joint states uses the following file for IP and port information:
+
+```stretch4_rgbd/stretch4_emulated_rgbd/rgbd_networking.py```
+
+The example code for sending RGB-D images alone uses IP and port information provided as command line arguments. 
 
 ## API Usage and Reference
 
@@ -264,10 +328,6 @@ rr.init("Stretch API Example", spawn=True)
 # dense depth (if computed via DenseDepthImage), and 3D point cloud overlays
 visualize_rgbd_frame("left", frame, vig_mask=vig_mask, depth_mask=depth_mask)
 ```
-
-We also provide two examples demonstrating transmitting the tightly-synchronized `RGBDFrame` generator over a PyZMQ network socket:
-- **Publisher**: `python3 examples/send_rgbd_images.py`
-- **Subscriber**: `python3 examples/recv_rgbd_images.py`
 
 ## Configuration (`emulated_rgbd_config.py`)
 

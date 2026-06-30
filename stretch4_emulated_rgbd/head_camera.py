@@ -95,7 +95,17 @@ class HeadCamera:
        frame rate from the pipeline's output rate, enabling software over-sampling (e.g. running the 
        camera at 30Hz) to minimize phase latency without blocking.
     """
-    def __init__(self, device_id=None, fps=10, resolution_height=800, compress=True, oak_buffer_size=1):
+    def __init__(self, camera_name="left", device_id=None, fps=10, resolution_height=800, compress=True, oak_buffer_size=1):
+        self.camera_name = camera_name
+        if self.camera_name == "left":
+            self.board_socket = dai.CameraBoardSocket.CAM_C
+            self.model_name = "head_left"
+        elif self.camera_name == "right":
+            self.board_socket = dai.CameraBoardSocket.CAM_B
+            self.model_name = "head_right"
+        else:
+            raise ValueError(f"Unsupported camera name for HeadCamera: {self.camera_name}")
+
         if device_id is None or device_id == "3.3.1":
             self.device_id = get_device_port_by_product_name("OAK-FFC-3P")
         else:
@@ -124,23 +134,23 @@ class HeadCamera:
         # Optional: set chunk size to 0 for lower latency
         self.pipeline.setXLinkChunkSize(0)
 
-        # Left camera is CAM_C on the OAK-FFC 3P board
-        self.cam_left = self.pipeline.create(dai.node.Camera)
-        self.cam_left.setSensorType(dai.CameraSensorType.COLOR)
-        self.cam_left.build(boardSocket=dai.CameraBoardSocket.CAM_C, sensorFps=self.fps)
+        # Camera socket configuration on the OAK-FFC 3P board
+        self.cam_node = self.pipeline.create(dai.node.Camera)
+        self.cam_node.setSensorType(dai.CameraSensorType.COLOR)
+        self.cam_node.build(boardSocket=self.board_socket, sensorFps=self.fps)
         
         # Add buffer size limits to the camera node
-        self.cam_left.setNumFramesPools(isp=self.oak_buffer_size + 1, raw=self.oak_buffer_size + 1, imgmanip=self.oak_buffer_size + 1)
+        self.cam_node.setNumFramesPools(isp=self.oak_buffer_size + 1, raw=self.oak_buffer_size + 1, imgmanip=self.oak_buffer_size + 1)
         
         # Request full 16:10 output
-        self.out_left = self.cam_left.requestOutput(
+        self.out_node = self.cam_node.requestOutput(
             size=self.image_size,
             type=dai.ImgFrame.Type.NV12,
             resizeMode=dai.ImgResizeMode.CROP,
             enableUndistortion=False,
         )
 
-        source_for_next_stage = self.out_left
+        source_for_next_stage = self.out_node
 
         if config.USE_BOARD_LEVEL_ROTATION:
             if self.resolution_height == 600 and self.compress:
@@ -175,7 +185,7 @@ class HeadCamera:
             self.manip.inputImage.setBlocking(False)
             self.manip.inputImage.setMaxSize(1)
             
-            self.out_left.link(self.manip.inputImage)
+            self.out_node.link(self.manip.inputImage)
             source_for_next_stage = self.manip.out
 
         if self.compress:
@@ -184,9 +194,9 @@ class HeadCamera:
             self.videoEnc.setQuality(80)
             self.videoEnc.setNumFramesPool(self.oak_buffer_size + 1)
             source_for_next_stage.link(self.videoEnc.input)
-            self.q_left = self.videoEnc.bitstream.createOutputQueue(maxSize=self.oak_buffer_size, blocking=False)
+            self.q_camera = self.videoEnc.bitstream.createOutputQueue(maxSize=self.oak_buffer_size, blocking=False)
         else:
-            self.q_left = source_for_next_stage.createOutputQueue(maxSize=self.oak_buffer_size, blocking=False)
+            self.q_camera = source_for_next_stage.createOutputQueue(maxSize=self.oak_buffer_size, blocking=False)
 
         self.history_size = max(100, self.fps * 2) # Buffer 2 seconds worth
         self.history_buffer = collections.deque(maxlen=self.history_size)
@@ -209,14 +219,16 @@ class HeadCamera:
         if self.device is not None:
             self.device.close()
 
-    def get_intrinsics(self, camera_name="head_left"):
+    def get_intrinsics(self, camera_name=None):
         """Returns the camera matrix and distortion coefficients."""
+        if camera_name is None:
+            camera_name = self.model_name
         M, D = None, None
         if self.device is not None:
             try:
                 calib = self.device.readCalibration()
-                M = np.array(calib.getCameraIntrinsics(dai.CameraBoardSocket.CAM_C, self.image_size[0], self.image_size[1]), dtype=np.float64)
-                D = np.array(calib.getDistortionCoefficients(dai.CameraBoardSocket.CAM_C), dtype=np.float64)
+                M = np.array(calib.getCameraIntrinsics(self.board_socket, self.image_size[0], self.image_size[1]), dtype=np.float64)
+                D = np.array(calib.getDistortionCoefficients(self.board_socket), dtype=np.float64)
             except Exception as e:
                 print(f"Warning: could not read factory calibration from OAK-FFC: {e}. Falling back to fleet calibration.")
                 
@@ -248,7 +260,7 @@ class HeadCamera:
     def _poll_loop(self):
         """Continuously drains the queue in the background."""
         while self.running:
-            msg = self.q_left.tryGet()
+            msg = self.q_camera.tryGet()
             if msg is not None:
                 img_data = None
                 if self.compress:

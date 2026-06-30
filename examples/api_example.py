@@ -12,21 +12,40 @@ from stretch4_emulated_rgbd.api import (
     DenseDepthImage,
     create_point_cloud_from_depth
 )
+from stretch4_emulated_rgbd.shared_utils import get_arg_parser
 from stretch4_emulated_rgbd import emulated_rgbd_config as config
 
 def main():
+    parser = get_arg_parser("Stretch 4 Emulated RGB-D API Capabilities Demonstration")
+    args = parser.parse_args()
+
+    use_left = args.camera in ["left", "left_right", "all"]
+    use_right = args.camera in ["right", "left_right", "all"]
+    use_center = args.camera in ["center", "all"]
+    use_left_right = (args.camera == "left_right")
+    use_left_right_center = (args.camera == "all")
+    use_left_lidar = (args.lidar in ["left", "both"])
+    use_right_lidar = (args.lidar in ["right", "both"])
+
     print("=" * 60)
     print(" Stretch 4 Emulated RGB-D API Capabilities Demonstration")
     print("=" * 60)
 
     # 1. Initialize the RGB-D Stream
-    # We use the left fisheye camera and the left LiDAR.
     print("\n[1] Initializing Stream...")
     streamer, generator = get_emulated_rgbd_stream(
-        use_left=True, 
-        use_left_lidar=True,
-        emulated_rgbd_fps=10.0,
-        camera_fps=10.0
+        use_left=use_left,
+        use_right=use_right,
+        use_center=use_center,
+        use_left_right=use_left_right,
+        use_left_right_center=use_left_right_center,
+        use_left_lidar=use_left_lidar,
+        use_right_lidar=use_right_lidar,
+        emulated_rgbd_fps=args.emulated_rgbd_fps,
+        camera_fps=args.camera_fps,
+        resolution_height=args.resolution,
+        compress=not args.disable_compression,
+        oak_buffer_size=args.oak_buffer_size
     )
 
     # 2. Initialize the Validity Mask Manager
@@ -58,7 +77,9 @@ def main():
             T_base_to_cam = frame.T_base_to_cam
             
             # 6. Apply Validity Masks
-            vig_mask, lidar_mask = mask_manager.get_masks("left", "left_lidar", rgb_image.shape)
+            c_name = frame.camera_type
+            lidar_str = frame.lidars_used if frame.lidars_used else "no_lidar"
+            vig_mask, lidar_mask = mask_manager.get_masks(c_name, lidar_str, rgb_image.shape)
             
             if False:
                 # Combine the masks and ERODE them slightly. 

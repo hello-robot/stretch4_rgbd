@@ -1,7 +1,13 @@
 import subprocess
 
 # Set these values for your network
-robot_ip = '100.90.83.97' #
+                                                                                                                                   
+# Calder 4010
+#robot_ip = '100.90.83.97'
+
+# Dali 4021
+robot_ip = '100.97.201.62'                                                                                                               
+
 remote_computer_ip = '100.69.89.24'
 
 # Set these to your preferred port numbers
