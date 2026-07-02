@@ -292,6 +292,46 @@ class RGBDFrame:
         frame._is_upright = data.get("is_upright", False)
         return frame
 
+class MultiRGBDFrame:
+    """
+    Encapsulates multiple synchronized RGBDFrames (e.g. left and right).
+    """
+    def __init__(self, left=None, right=None, center=None, timestamp=None):
+        self.left = left
+        self.right = right
+        self.center = center
+        self.timestamp = timestamp if timestamp is not None else (left.timestamp if left else (right.timestamp if right else (center.timestamp if center else 0.0)))
+
+    def to_dict(self):
+        return {
+            "is_multi_frame": True,
+            "left": self.left.to_dict() if self.left else None,
+            "right": self.right.to_dict() if self.right else None,
+            "center": self.center.to_dict() if self.center else None,
+            "timestamp": self.timestamp
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        if not data.get("is_multi_frame"):
+            # Fallback for single frame dicts
+            frame = RGBDFrame.from_dict(data)
+            if frame.camera_type == "left":
+                return cls(left=frame, timestamp=frame.timestamp)
+            elif frame.camera_type == "right":
+                return cls(right=frame, timestamp=frame.timestamp)
+            elif frame.camera_type == "center":
+                return cls(center=frame, timestamp=frame.timestamp)
+            return cls(left=frame, timestamp=frame.timestamp) # Default to left
+            
+        return cls(
+            left=RGBDFrame.from_dict(data["left"]) if data.get("left") else None,
+            right=RGBDFrame.from_dict(data["right"]) if data.get("right") else None,
+            center=RGBDFrame.from_dict(data["center"]) if data.get("center") else None,
+            timestamp=data.get("timestamp")
+        )
+
+
 class CapturedSequence:
     """
     A unified wrapper that encapsulates both the lightweight RGBDFrame
@@ -558,7 +598,9 @@ def get_arg_parser(description):
     parser.add_argument("--oak_buffer_size", type=int, default=1, help="Size of the OAK output queue. Default: 1.")
     parser.add_argument("--emulated_rgbd_fps", type=float, default=10.0, help="Target FPS for the final Emulated RGB-D imagery output (e.g., 10, 5, 3.33). Default: 10.0.")
     parser.add_argument("--camera_fps", type=int, default=30, help="Hardware FPS for the OAK-FFC camera. Available options: 10, 15, 20, 25, 30, 60. Set higher than emulated_rgbd_fps for software over-sampling to reduce phase latency. Default: 30.")
+    parser.add_argument("--merge_lidars", action="store_true", help="If passed, merges points from both LiDARs for each camera. By default, associates left camera with left LiDAR and right camera with right LiDAR for performance.")
     return parser
+
 
 class NonBlockingInput:
     def __init__(self):

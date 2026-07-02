@@ -167,8 +167,10 @@ def main():
             resolution_height=args.resolution,
             compress=not args.disable_compression,
             oak_buffer_size=args.oak_buffer_size,
-            calibration=calibration
+            calibration=calibration,
+            merge_lidars=args.merge_lidars
         )
+
     except RuntimeError as e:
         print(e)
         return
@@ -206,11 +208,12 @@ def main():
                 visualize_rgbd_frame(c_name, frame, vig_mask=vig_mask, depth_mask=depth_mask)
 
             if hasattr(frame_data, "left") or hasattr(frame_data, "right") or hasattr(frame_data, "center"):
-                if hasattr(frame_data, "left") and frame_data.left: _render_with_masks("left", frame_data.left)
-                if hasattr(frame_data, "right") and frame_data.right: _render_with_masks("right", frame_data.right)
-                if hasattr(frame_data, "center") and frame_data.center: _render_with_masks("center", frame_data.center)
+                if getattr(frame_data, "left", None): _render_with_masks("left", frame_data.left)
+                if getattr(frame_data, "right", None): _render_with_masks("right", frame_data.right)
+                if getattr(frame_data, "center", None): _render_with_masks("center", frame_data.center)
             else:
                 _render_with_masks(frame_data.camera_type, frame_data)
+
 
     except KeyboardInterrupt:
         print("Stopping... (Force quitting due to background threads)")

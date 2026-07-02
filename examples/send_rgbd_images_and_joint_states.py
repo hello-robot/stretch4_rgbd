@@ -142,8 +142,10 @@ def main():
             resolution_height=args.resolution,
             compress=not args.disable_compression,
             oak_buffer_size=args.oak_buffer_size,
-            calibration=calibration
+            calibration=calibration,
+            merge_lidars=args.merge_lidars
         )
+
     except RuntimeError as e:
         print(f"Error initializing streamer: {e}")
         return

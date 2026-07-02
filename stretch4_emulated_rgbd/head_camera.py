@@ -96,15 +96,22 @@ class HeadCamera:
        camera at 30Hz) to minimize phase latency without blocking.
     """
     def __init__(self, camera_name="left", device_id=None, fps=10, resolution_height=800, compress=True, oak_buffer_size=1):
-        self.camera_name = camera_name
-        if self.camera_name == "left":
-            self.board_socket = dai.CameraBoardSocket.CAM_C
-            self.model_name = "head_left"
-        elif self.camera_name == "right":
-            self.board_socket = dai.CameraBoardSocket.CAM_B
-            self.model_name = "head_right"
+        if isinstance(camera_name, str):
+            self.camera_names = [camera_name]
         else:
-            raise ValueError(f"Unsupported camera name for HeadCamera: {self.camera_name}")
+            self.camera_names = camera_name
+
+        self.board_sockets = {}
+        self.model_names = {}
+        for name in self.camera_names:
+            if name == "left":
+                self.board_sockets[name] = dai.CameraBoardSocket.CAM_C
+                self.model_names[name] = "head_left"
+            elif name == "right":
+                self.board_sockets[name] = dai.CameraBoardSocket.CAM_B
+                self.model_names[name] = "head_right"
+            else:
+                raise ValueError(f"Unsupported camera name for HeadCamera: {name}")
 
         if device_id is None or device_id == "3.3.1":
             self.device_id = get_device_port_by_product_name("OAK-FFC-3P")
@@ -134,74 +141,81 @@ class HeadCamera:
         # Optional: set chunk size to 0 for lower latency
         self.pipeline.setXLinkChunkSize(0)
 
-        # Camera socket configuration on the OAK-FFC 3P board
-        self.cam_node = self.pipeline.create(dai.node.Camera)
-        self.cam_node.setSensorType(dai.CameraSensorType.COLOR)
-        self.cam_node.build(boardSocket=self.board_socket, sensorFps=self.fps)
-        
-        # Add buffer size limits to the camera node
-        self.cam_node.setNumFramesPools(isp=self.oak_buffer_size + 1, raw=self.oak_buffer_size + 1, imgmanip=self.oak_buffer_size + 1)
-        
-        # Request full 16:10 output
-        self.out_node = self.cam_node.requestOutput(
-            size=self.image_size,
-            type=dai.ImgFrame.Type.NV12,
-            resizeMode=dai.ImgResizeMode.CROP,
-            enableUndistortion=False,
-        )
-
-        source_for_next_stage = self.out_node
-
-        if config.USE_BOARD_LEVEL_ROTATION:
-            if self.resolution_height == 600 and self.compress:
-                raise ValueError("Board-level rotation is incompatible with 600p resolution when using MJPEG compression because the rotated width (600) is not a multiple of 16. Please disable board-level rotation or choose a different resolution (e.g., 800p).")
-            
-            if self.fps > 10:
-                raise ValueError(
-                    f"Camera FPS of {self.fps} is too high for board-level rotation. "
-                    "The Luxonis board (Myriad X VPU) lacks a zero-cost 90-degree memory transpose operation "
-                    "for the NV12 format. Instead, it relies on a generic hardware warp engine (ImageManip) "
-                    "which is highly compute-intensive. At frame rates above 10 FPS, the SHAVE cores cannot "
-                    "keep up, resulting in severe pipeline latency and frame drops. "
-                    "Please select a camera_fps <= 10 (e.g., 10) or disable USE_BOARD_LEVEL_ROTATION."
-                )
-            else:
-                print("\n\033[93m" + "="*80)
-                print("WARNING: USE_BOARD_LEVEL_ROTATION is enabled.")
-                print("This feature routes 90-degree NV12 image rotations through the Luxonis generic")
-                print("hardware warp engine (ImageManip), which consumes significant compute cycles.")
-                print("This introduces noticeable latency and synchronization issues between the RGB")
-                print("and depth components. It is STRONGLY RECOMMENDED to set USE_BOARD_LEVEL_ROTATION")
-                print("to False in emulated_rgbd_config.py to leverage the highly efficient (<1ms)")
-                print("software rotation fallback instead.")
-                print("="*80 + "\033[0m\n")
-                
-            self.manip = self.pipeline.create(dai.node.ImageManip)
-            self.manip.initialConfig.addRotateDeg(270)
-            self.manip.setMaxOutputFrameSize(self.image_size[0] * self.image_size[1] * 3)
-            
-            # Configure the input queue to drop frames if the SHAVE cores can't keep up
-            # with the 270-degree rotation, to prioritize low latency over frame rate.
-            self.manip.inputImage.setBlocking(False)
-            self.manip.inputImage.setMaxSize(1)
-            
-            self.out_node.link(self.manip.inputImage)
-            source_for_next_stage = self.manip.out
-
-        if self.compress:
-            self.videoEnc = self.pipeline.create(dai.node.VideoEncoder)
-            self.videoEnc.setDefaultProfilePreset(self.fps, dai.VideoEncoderProperties.Profile.MJPEG)
-            self.videoEnc.setQuality(80)
-            self.videoEnc.setNumFramesPool(self.oak_buffer_size + 1)
-            source_for_next_stage.link(self.videoEnc.input)
-            self.q_camera = self.videoEnc.bitstream.createOutputQueue(maxSize=self.oak_buffer_size, blocking=False)
-        else:
-            self.q_camera = source_for_next_stage.createOutputQueue(maxSize=self.oak_buffer_size, blocking=False)
-
+        self.q_cameras = {}
+        self.history_buffers = {}
         self.history_size = max(100, self.fps * 2) # Buffer 2 seconds worth
-        self.history_buffer = collections.deque(maxlen=self.history_size)
+
+        for name in self.camera_names:
+            # Camera socket configuration on the OAK-FFC 3P board
+            cam_node = self.pipeline.create(dai.node.Camera)
+            cam_node.setSensorType(dai.CameraSensorType.COLOR)
+            cam_node.build(boardSocket=self.board_sockets[name], sensorFps=self.fps)
+            
+            # Add buffer size limits to the camera node
+            cam_node.setNumFramesPools(isp=self.oak_buffer_size + 1, raw=self.oak_buffer_size + 1, imgmanip=self.oak_buffer_size + 1)
+            
+            # Request full 16:10 output
+            out_node = cam_node.requestOutput(
+                size=self.image_size,
+                type=dai.ImgFrame.Type.NV12,
+                resizeMode=dai.ImgResizeMode.CROP,
+                enableUndistortion=False,
+            )
+
+            source_for_next_stage = out_node
+
+            if config.USE_BOARD_LEVEL_ROTATION:
+                if self.resolution_height == 600 and self.compress:
+                    raise ValueError("Board-level rotation is incompatible with 600p resolution when using MJPEG compression because the rotated width (600) is not a multiple of 16. Please disable board-level rotation or choose a different resolution (e.g., 800p).")
+                
+                if self.fps > 10:
+                    raise ValueError(
+                        f"Camera FPS of {self.fps} is too high for board-level rotation. "
+                        "The Luxonis board (Myriad X VPU) lacks a zero-cost 90-degree memory transpose operation "
+                        "for the NV12 format. Instead, it relies on a generic hardware warp engine (ImageManip) "
+                        "which is highly compute-intensive. At frame rates above 10 FPS, the SHAVE cores cannot "
+                        "keep up, resulting in severe pipeline latency and frame drops. "
+                        "Please select a camera_fps <= 10 (e.g., 10) or disable USE_BOARD_LEVEL_ROTATION."
+                    )
+                else:
+                    print("\n\033[93m" + "="*80)
+                    print("WARNING: USE_BOARD_LEVEL_ROTATION is enabled.")
+                    print(f"This feature is being applied to {name} camera.")
+                    print("This feature routes 90-degree NV12 image rotations through the Luxonis generic")
+                    print("hardware warp engine (ImageManip), which consumes significant compute cycles.")
+                    print("This introduces noticeable latency and synchronization issues between the RGB")
+                    print("and depth components. It is STRONGLY RECOMMENDED to set USE_BOARD_LEVEL_ROTATION")
+                    print("to False in emulated_rgbd_config.py to leverage the highly efficient (<1ms)")
+                    print("software rotation fallback instead.")
+                    print("="*80 + "\033[0m\n")
+                    
+                manip = self.pipeline.create(dai.node.ImageManip)
+                manip.initialConfig.addRotateDeg(270)
+                manip.setMaxOutputFrameSize(self.image_size[0] * self.image_size[1] * 3)
+                
+                # Configure the input queue to drop frames if the SHAVE cores can't keep up
+                # with the 270-degree rotation, to prioritize low latency over frame rate.
+                manip.inputImage.setBlocking(False)
+                manip.inputImage.setMaxSize(1)
+                
+                out_node.link(manip.inputImage)
+                source_for_next_stage = manip.out
+
+            if self.compress:
+                videoEnc = self.pipeline.create(dai.node.VideoEncoder)
+                videoEnc.setDefaultProfilePreset(self.fps, dai.VideoEncoderProperties.Profile.MJPEG)
+                videoEnc.setQuality(80)
+                videoEnc.setNumFramesPool(self.oak_buffer_size + 1)
+                source_for_next_stage.link(videoEnc.input)
+                self.q_cameras[name] = videoEnc.bitstream.createOutputQueue(maxSize=self.oak_buffer_size, blocking=False)
+            else:
+                self.q_cameras[name] = source_for_next_stage.createOutputQueue(maxSize=self.oak_buffer_size, blocking=False)
+
+            self.history_buffers[name] = collections.deque(maxlen=self.history_size)
+        
         self.lock = threading.Lock()
         self.running = False
+
 
     def start(self):
         """Starts the DepthAI pipeline and the background poller thread."""
@@ -222,21 +236,25 @@ class HeadCamera:
     def get_intrinsics(self, camera_name=None):
         """Returns the camera matrix and distortion coefficients."""
         if camera_name is None:
-            camera_name = self.model_name
+            camera_name = self.camera_names[0]
+            
+        model_name = self.model_names.get(camera_name)
+        board_socket = self.board_sockets.get(camera_name)
+        
         M, D = None, None
         if self.device is not None:
             try:
                 calib = self.device.readCalibration()
-                M = np.array(calib.getCameraIntrinsics(self.board_socket, self.image_size[0], self.image_size[1]), dtype=np.float64)
-                D = np.array(calib.getDistortionCoefficients(self.board_socket), dtype=np.float64)
+                M = np.array(calib.getCameraIntrinsics(board_socket, self.image_size[0], self.image_size[1]), dtype=np.float64)
+                D = np.array(calib.getDistortionCoefficients(board_socket), dtype=np.float64)
             except Exception as e:
-                print(f"Warning: could not read factory calibration from OAK-FFC: {e}. Falling back to fleet calibration.")
+                print(f"Warning: could not read factory calibration from OAK-FFC for {camera_name}: {e}. Falling back to fleet calibration.")
                 
                 try:
                     from stretch4_body.subsystem.cameras.models.camera_calibration import RGBCameraCalibration
                     from stretch4_body.subsystem.cameras import RGBCameras
                     fleet_calib = RGBCameraCalibration.load_calibration_from_fleet_path(
-                        camera_type=RGBCameras[camera_name], is_flip_width_and_height=False
+                        camera_type=RGBCameras[model_name], is_flip_width_and_height=False
                     )
                     if fleet_calib and fleet_calib.camera_matrix is not None:
                         M = np.array(fleet_calib.camera_matrix, dtype=np.float64)
@@ -258,32 +276,43 @@ class HeadCamera:
         return M, D
 
     def _poll_loop(self):
-        """Continuously drains the queue in the background."""
+        """Continuously drains all camera queues in the background."""
         while self.running:
-            msg = self.q_camera.tryGet()
-            if msg is not None:
-                img_data = None
-                if self.compress:
-                    import cv2
-                    img_data = msg.getData()
-                    img = cv2.imdecode(img_data, cv2.IMREAD_COLOR)
-                else:
-                    img = msg.getCvFrame()
-                
-                # Timestamp synced with host monotonic clock
-                timestamp = msg.getTimestamp().total_seconds()
-                seq_num = msg.getSequenceNum()
-                
-                with self.lock:
-                    self.history_buffer.append((img, timestamp, seq_num, img_data))
-            else:
+            got_any = False
+            for name, q in self.q_cameras.items():
+                msg = q.tryGet()
+                if msg is not None:
+                    got_any = True
+                    img_data = None
+                    img = None
+                    
+                    if self.compress:
+                        img_data = msg.getData()
+                        # Lazy decompression: do NOT call cv2.imdecode here
+                    else:
+                        img = msg.getCvFrame()
+                    
+                    # Timestamp synced with host monotonic clock
+                    timestamp = msg.getTimestamp().total_seconds()
+                    seq_num = msg.getSequenceNum()
+                    
+                    with self.lock:
+                        self.history_buffers[name].append((img, timestamp, seq_num, img_data))
+            
+            if not got_any:
                 time.sleep(0.005)
 
-    def get_closest_frame(self, target_timestamp):
+
+    def get_closest_frame(self, target_timestamp, camera_name=None):
         """Returns the frame (img, timestamp, seq, img_data) closest to the target_timestamp."""
+        if camera_name is None:
+            camera_name = self.camera_names[0]
+            
         with self.lock:
-            if not self.history_buffer:
+            buffer = self.history_buffers.get(camera_name)
+            if not buffer:
                 return None, None, None, None
                 
-            closest_frame = min(self.history_buffer, key=lambda x: abs(x[1] - target_timestamp))
+            closest_frame = min(buffer, key=lambda x: abs(x[1] - target_timestamp))
             return closest_frame
+

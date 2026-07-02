@@ -44,7 +44,8 @@ def main():
     try:
         while True:
             output_dict = socket.recv_pyobj()
-            frame = RGBDFrame.from_dict(output_dict)
+            from stretch4_emulated_rgbd.shared_utils import MultiRGBDFrame
+            multi_frame = MultiRGBDFrame.from_dict(output_dict)
             frames_received += 1
             
             if mask_manager is None:
@@ -56,13 +57,21 @@ def main():
                 else:
                     mask_manager = ValidityMaskManager()
             
-            # Access the cleanly aligned, decompressed, and rotated image 
-            # simply by calling frame.image (handled transparently by RGBDFrame)
-            color_image = frame.image
-            depth_image = frame.depth_image
-            
-            c_name = getattr(frame, 'camera_type', 'left')
-            lidar_str = getattr(frame, 'lidars_used', 'no_lidar')
+            # Extract all active frames
+            frames = []
+            if multi_frame.left: frames.append(multi_frame.left)
+            if multi_frame.right: frames.append(multi_frame.right)
+            if multi_frame.center: frames.append(multi_frame.center)
+
+            for frame in frames:
+                # Access the cleanly aligned, decompressed, and rotated image 
+                # simply by calling frame.image (handled transparently by RGBDFrame)
+                color_image = frame.image
+                depth_image = frame.depth_image
+                
+                c_name = frame.camera_type
+                lidar_str = getattr(frame, 'lidars_used', 'no_lidar')
+
             if not lidar_str:
                 lidar_str = "no_lidar"
                 
@@ -78,14 +87,17 @@ def main():
             
             # Show RGB
             if color_image is not None:
-                cv2.namedWindow("RGB Stream", cv2.WINDOW_NORMAL)
-                cv2.imshow("RGB Stream", color_image)
+                win_name = f"RGB Stream ({c_name})"
+                cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+                cv2.imshow(win_name, color_image)
                 
             # Show Depth
             if depth_image is not None:
                 depth_vis = apply_color_map(depth_image)
-                cv2.namedWindow("Depth Stream", cv2.WINDOW_NORMAL)
-                cv2.imshow("Depth Stream", depth_vis)
+                win_name = f"Depth Stream ({c_name})"
+                cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+                cv2.imshow(win_name, depth_vis)
+
                 
             key = cv2.waitKey(1)
             if key in (27, ord('q')):
