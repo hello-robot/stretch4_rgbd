@@ -186,24 +186,24 @@ The first example sends RGB-D images, receives them, and then visualizes them us
 
 To run the publisher (e.g. for both cameras):
 ```bash
-python3 scripts/send_rgbd_images.py --camera left_right --lidar both
+python3 examples/send_rgbd_images.py --camera left_right --lidar both
 ```
 
 To run the subscriber:
 ```bash
-python3 scripts/recv_rgbd_images.py
+python3 examples/recv_rgbd_images.py
 ```
 
 The second example send RGB-D images with the synchronized joint state of the robot, receives them, and then visualizes the colored 3D point cloud in Rerun along with the joint states.
 
 To run the publisher (e.g. for both cameras):
 ```bash
-python3 scripts/send_rgbd_images_and_joint_states.py --camera left_right --lidar both
+python3 examples/send_rgbd_images_and_joint_states.py --camera left_right --lidar both
 ```
 
 To run the subscriber:
 ```bash
-python3 scripts/recv_rgbd_images_and_joint_states.py
+python3 examples/recv_rgbd_images_and_joint_states.py
 ```
 
 Both examples can send data over the network. To do so, you will need to use the `--remote` flag for both the publisher and the subscriber and provide IP and port information. Sending RGB-D images with joint states uses the following file for IP and port information:
