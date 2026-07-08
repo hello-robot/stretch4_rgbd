@@ -75,10 +75,7 @@ To capture using the right camera and right LiDAR:
 ```bash
 python3 scripts/capture_emulated_rgbd.py --camera right --lidar right
 ```
-To capture using the left and right cameras and both LiDARs simultaneously:
-```bash
-python3 scripts/capture_emulated_rgbd.py --camera left_right --lidar both
-```
+
 *(Note: This must be run on the Stretch 4 robot. It requires `stretch4_body` and the use of the robot's cameras and LiDARs)*
 
 ### 2. Preprocessing
