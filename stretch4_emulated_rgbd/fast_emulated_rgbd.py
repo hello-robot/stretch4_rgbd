@@ -213,25 +213,39 @@ class FastEmulatedRGBDStreamer:
                     # Decide which points to use for this specific camera
                     if self.merge_lidars:
                         pts_to_use = merged_pts_base_global
+                        active_lidars = list(synced_lidar_frames.keys())
+                        if len(active_lidars) == 2:
+                            lidars_for_cam = "both_lidar"
+                        elif len(active_lidars) == 1:
+                            lidars_for_cam = f"{active_lidars[0]}_lidar"
+                        else:
+                            lidars_for_cam = "no_lidar"
                     else:
-                        # Default: Associate left camera with left lidar, right with right
-                        # If the preferred side is missing, fallback to whatever is available
+                        # Default: Associate left camera with left lidar, right with right.
+                        # Do not fall back to the other side if the preferred lidar is missing.
                         pref_l_frame = l_frame if c_name == "left" else None
                         pref_r_frame = r_frame if c_name == "right" else None
                         
-                        # Fallback if preferred is missing but other exists
-                        if pref_l_frame is None and pref_r_frame is None:
-                            pref_l_frame = l_frame
-                            pref_r_frame = r_frame
-                            
                         pts_to_use = merge_lidar_points(
                             pref_l_frame.points if pref_l_frame else None,
                             pref_r_frame.points if pref_r_frame else None,
                             self.T_lidar_to_base_left,
                             self.T_lidar_to_base_right
                         )
+                        
+                        # Set actual lidar used for this camera
+                        active_lidars = []
+                        if pref_l_frame: active_lidars.append("left")
+                        if pref_r_frame: active_lidars.append("right")
+                        
+                        if len(active_lidars) == 2:
+                            lidars_for_cam = "both_lidar"
+                        elif len(active_lidars) == 1:
+                            lidars_for_cam = f"{active_lidars[0]}_lidar"
+                        else:
+                            lidars_for_cam = "no_lidar"
                     
-                    rgbd_frames[c_name] = self._get_single_rgbd_frame(c_name, mid_ts, synced_lidar_frames, pts_to_use)
+                    rgbd_frames[c_name] = self._get_single_rgbd_frame(c_name, mid_ts, synced_lidar_frames, pts_to_use, lidars_for_cam)
 
                 if len(self.camera_names) == 1:
                     yield rgbd_frames[self.camera_names[0]]
@@ -252,7 +266,7 @@ class FastEmulatedRGBDStreamer:
             print(f"Streamer encountered an error: {e}")
             traceback.print_exc()
 
-    def _get_single_rgbd_frame(self, camera_name, mid_ts, synced_lidar_frames, merged_pts_base):
+    def _get_single_rgbd_frame(self, camera_name, mid_ts, synced_lidar_frames, merged_pts_base, lidars_used=None):
         """Internal helper to process a single camera's RGBD frame."""
         rgb_frame = self.camera.get_closest_frame(mid_ts, camera_name=camera_name)
         if rgb_frame is None:
@@ -290,7 +304,7 @@ class FastEmulatedRGBDStreamer:
                 timestamp_image=rgb_timestamp,
                 timestamp_lidar_left=l_pts.timestamp if l_pts else None,
                 timestamp_lidar_right=r_pts.timestamp if r_pts else None,
-                lidars_used=" ".join([f"{l}_lidar" for l in synced_lidar_frames.keys()])
+                lidars_used=lidars_used if lidars_used is not None else " ".join([f"{l}_lidar" for l in synced_lidar_frames.keys()])
             )
 
         # Transform to Camera Frame
@@ -375,7 +389,7 @@ class FastEmulatedRGBDStreamer:
             timestamp_image=rgb_timestamp,
             timestamp_lidar_left=l_pts.timestamp if l_pts else None,
             timestamp_lidar_right=r_pts.timestamp if r_pts else None,
-            lidars_used=" ".join([f"{l}_lidar" for l in synced_lidar_frames.keys()])
+            lidars_used=lidars_used if lidars_used is not None else " ".join([f"{l}_lidar" for l in synced_lidar_frames.keys()])
         )
 
 
