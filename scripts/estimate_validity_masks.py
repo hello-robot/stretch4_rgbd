@@ -139,6 +139,7 @@ def main():
     args.opt_yaml = None
     
     estimate_masks(args)
+    os._exit(0)
 
 if __name__ == "__main__":
     main()

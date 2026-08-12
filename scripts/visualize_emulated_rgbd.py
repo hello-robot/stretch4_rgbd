@@ -204,7 +204,10 @@ def main():
                 
             # Helper to render and apply masks
             def _render_with_masks(c_name, frame):
-                vig_mask, depth_mask = mask_manager.get_masks(c_name, lidar_str, frame.image.shape)
+                frame_lidar_str = getattr(frame, 'lidars_used', None)
+                if not frame_lidar_str:
+                    frame_lidar_str = lidar_str
+                vig_mask, depth_mask = mask_manager.get_masks(c_name, frame_lidar_str, frame.image.shape)
                 visualize_rgbd_frame(c_name, frame, vig_mask=vig_mask, depth_mask=depth_mask)
 
             if hasattr(frame_data, "left") or hasattr(frame_data, "right") or hasattr(frame_data, "center"):

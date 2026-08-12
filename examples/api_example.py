@@ -95,7 +95,7 @@ def main():
                 # 6. Apply Validity Masks
                 c_name = frame.camera_type
                 lidar_str = frame.lidars_used if frame.lidars_used else "no_lidar"
-                vig_mask, lidar_mask = mask_manager.get_masks(c_name, lidar_str, rgb_image.shape)
+                vig_mask, lidar_mask = mask_manager.get_masks(c_name, lidar_str, rgb_image.shape, fallback_to_ones=True)
                 
                 dense_depth_validity_mask = vig_mask & lidar_mask
                 
@@ -106,6 +106,8 @@ def main():
                 # 7. Generate Dense Depth Map
                 dense_processor = DenseDepthImage(rgb_image, depth_image, apply_validity_mask=False)
                 dense_depth = dense_processor.compute_dense_depth()
+                if dense_depth is None:
+                    dense_depth = np.zeros(rgb_image.shape[:2], dtype=np.float32)
                 
                 # Before creating a point cloud, apply the eroded combined mask to drop unstable boundary pixels
                 dense_depth[~dense_depth_validity_mask] = 0
@@ -190,4 +192,8 @@ def main():
         streamer.stop()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    os._exit(0)
