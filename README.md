@@ -214,7 +214,8 @@ The example code for sending RGB-D images alone uses IP and port information pro
 For developers writing custom applications, the repository provides a unified API in `stretch4_emulated_rgbd.api` to stream and process synchronized RGB-D frames.
 
 > [!TIP]
-> **Quick Start:** For a complete, runnable demonstration of the API capabilities—including lazy properties, calibration extraction, validity masking, dense depth interpolation, and colored 3D point cloud generation—see [`examples/api_example.py`](file:///home/hello-robot/repos/stretch4_rgbd/examples/api_example.py).
+> **Quick Start:** For a complete, runnable demonstration of the API capabilities—including lazy properties, calibration extraction, validity masking, dense depth interpolation, and colored 3D point cloud generation—see [`examples/api_example.py`](file:///home/hello-robot/repos/stretch4_rgbd/examples/api_example.py). 
+> **WARNING** The Rerun visualization used with the script has two notable issues: 1. The left and right RGB-D images are displayed in the same panel. To visualize one of them, you can hide the overlayed images from the other. 2. The middle 3D point cloud shows the result of generating a point cloud from every depth point in the dense depth image, which uses interpolation. Currently, this results in substantial artifacts due to some of the interpolated depth points being invalid.
 
 #### Summary of Processing Steps
 When the `FastEmulatedRGBDStreamer` captures and aligns an RGB-D frame, it executes the following steps internally *before* yielding it to you:
