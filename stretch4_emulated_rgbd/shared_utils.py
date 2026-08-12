@@ -292,6 +292,46 @@ class RGBDFrame:
         frame._is_upright = data.get("is_upright", False)
         return frame
 
+class MultiRGBDFrame:
+    """
+    Encapsulates multiple synchronized RGBDFrames (e.g. left and right).
+    """
+    def __init__(self, left=None, right=None, center=None, timestamp=None):
+        self.left = left
+        self.right = right
+        self.center = center
+        self.timestamp = timestamp if timestamp is not None else (left.timestamp if left else (right.timestamp if right else (center.timestamp if center else 0.0)))
+
+    def to_dict(self):
+        return {
+            "is_multi_frame": True,
+            "left": self.left.to_dict() if self.left else None,
+            "right": self.right.to_dict() if self.right else None,
+            "center": self.center.to_dict() if self.center else None,
+            "timestamp": self.timestamp
+        }
+
+    @classmethod
+    def from_dict(cls, data):
+        if not data.get("is_multi_frame"):
+            # Fallback for single frame dicts
+            frame = RGBDFrame.from_dict(data)
+            if frame.camera_type == "left":
+                return cls(left=frame, timestamp=frame.timestamp)
+            elif frame.camera_type == "right":
+                return cls(right=frame, timestamp=frame.timestamp)
+            elif frame.camera_type == "center":
+                return cls(center=frame, timestamp=frame.timestamp)
+            return cls(left=frame, timestamp=frame.timestamp) # Default to left
+            
+        return cls(
+            left=RGBDFrame.from_dict(data["left"]) if data.get("left") else None,
+            right=RGBDFrame.from_dict(data["right"]) if data.get("right") else None,
+            center=RGBDFrame.from_dict(data["center"]) if data.get("center") else None,
+            timestamp=data.get("timestamp")
+        )
+
+
 class CapturedSequence:
     """
     A unified wrapper that encapsulates both the lightweight RGBDFrame
@@ -558,7 +598,9 @@ def get_arg_parser(description):
     parser.add_argument("--oak_buffer_size", type=int, default=1, help="Size of the OAK output queue. Default: 1.")
     parser.add_argument("--emulated_rgbd_fps", type=float, default=10.0, help="Target FPS for the final Emulated RGB-D imagery output (e.g., 10, 5, 3.33). Default: 10.0.")
     parser.add_argument("--camera_fps", type=int, default=30, help="Hardware FPS for the OAK-FFC camera. Available options: 10, 15, 20, 25, 30, 60. Set higher than emulated_rgbd_fps for software over-sampling to reduce phase latency. Default: 30.")
+    parser.add_argument("--merge_lidars", action="store_true", help="If passed, merges points from both LiDARs for each camera. By default, associates left camera with left LiDAR and right camera with right LiDAR for performance.")
     return parser
+
 
 class NonBlockingInput:
     def __init__(self):
@@ -660,12 +702,16 @@ def render_rgbd(c_name: str, frame: RGBDFrame, vig_mask=None, depth_mask=None):
             elif c_name == "right":
                 depth_vis = cv2.rotate(depth_vis, cv2.ROTATE_90_CLOCKWISE)
             
+        frame_lidar_name = getattr(frame, "lidars_used", None)
+        if not frame_lidar_name:
+            frame_lidar_name = f"{c_name}_lidar" if c_name in ["left", "right"] else "no_lidar"
+
         dense_processor = DenseDepthImage(
             frame.image, 
             frame.depth_image, 
             apply_validity_mask=True, 
             camera_name=c_name, 
-            lidar_name=getattr(frame, "lidars_used", "both_lidar")
+            lidar_name=frame_lidar_name
         )
         
         combined_mask = None
@@ -1015,6 +1061,8 @@ class ValidityMaskManager:
     dynamically scales them down to precisely match the active stream's resolution, 
     avoiding the need to generate new masks for every possible resolution.
     """
+    _WARNED_MISSING = set()
+
     def __init__(self, masks_dir=None):
         if masks_dir is None:
             fleet_path = os.environ.get("HELLO_FLEET_PATH", "")
@@ -1023,61 +1071,122 @@ class ValidityMaskManager:
                 masks_dir = os.path.join(fleet_path, fleet_id, "calibration_cameras")
             else:
                 masks_dir = "data/validity_masks"
-        self.masks_dir = Path(masks_dir)
+        self.masks_dir = Path(masks_dir).resolve()
         self.masks_cache = {}
 
-    def get_masks(self, camera_name, lidar_name, shape):
+    @staticmethod
+    def _normalize_lidar_name(lidar_name):
+        if not lidar_name:
+            return "no_lidar"
+        lidar_str = str(lidar_name).strip()
+        if lidar_str in ["both", "both_lidar", "left_lidar right_lidar", "right_lidar left_lidar"]:
+            return "both_lidar"
+        elif lidar_str in ["left", "left_lidar"]:
+            return "left_lidar"
+        elif lidar_str in ["right", "right_lidar"]:
+            return "right_lidar"
+        elif lidar_str in ["no_lidar", "none"]:
+            return "no_lidar"
+        return lidar_str
+
+    def _warn_missing_masks(self, camera_name, norm_lidar_name, missing_files):
+        """
+        Prints a standardized, prominent warning message to sys.stderr explaining missing masks,
+        search location, and guidance on how to generate them. Deduplicated per session.
+        """
+        warn_key = (camera_name, norm_lidar_name, tuple(sorted(missing_files)))
+        if warn_key in ValidityMaskManager._WARNED_MISSING:
+            return
+        ValidityMaskManager._WARNED_MISSING.add(warn_key)
+
+        banner_width = 80
+        line = "=" * banner_width
+        
+        cmd_cam = camera_name if camera_name in ["left", "right", "center"] else "all"
+        cmd_lidar = "both" if "both" in norm_lidar_name else ("left" if "left" in norm_lidar_name else ("right" if "right" in norm_lidar_name else "both"))
+        
+        print("\n" + line, file=sys.stderr)
+        print(f" WARNING: Missing Validity Mask(s) for Camera '{camera_name}' (LiDAR: '{norm_lidar_name}')", file=sys.stderr)
+        print(line, file=sys.stderr)
+        print(" The following validity mask file(s) were not found on disk:", file=sys.stderr)
+        for fname in missing_files:
+            print(f"   - {fname}", file=sys.stderr)
+        print(f"\n Searched Location:", file=sys.stderr)
+        print(f"   {self.masks_dir}", file=sys.stderr)
+        print(f"\n Guidance:", file=sys.stderr)
+        print(f"   To generate the missing validity mask(s), run the estimation script:", file=sys.stderr)
+        print(f"   python3 scripts/estimate_validity_masks.py --camera {cmd_cam} --lidar {cmd_lidar}", file=sys.stderr)
+        print(line + "\n", file=sys.stderr)
+
+    def get_masks(self, camera_name, lidar_name, shape, fallback_to_ones=False):
         """
         Returns (vignette_mask, depth_valid_mask) as boolean arrays scaled to shape (h, w).
-        If not found on disk, returns (None, None) for each respectively.
+        If not found on disk, prints a standardized missing mask warning once per session and
+        returns None (or np.ones((h, w), dtype=bool) if fallback_to_ones is True).
         """
         h, w = shape[:2]
-        key = (camera_name, lidar_name, h, w)
+        norm_lidar_name = self._normalize_lidar_name(lidar_name)
+        key = (camera_name, norm_lidar_name, h, w, fallback_to_ones)
         if key in self.masks_cache:
             return self.masks_cache[key]
-            
-        vig_path = self.masks_dir / f"rgb_vignette_mask_{camera_name}_camera.png"
-        depth_path = self.masks_dir / f"depth_valid_mask_{camera_name}_camera_{lidar_name}.png"
-        
+
+        vig_filename = f"rgb_vignette_mask_{camera_name}_camera.png"
+        depth_filename = f"depth_valid_mask_{camera_name}_camera_{norm_lidar_name}.png"
+
+        vig_path = self.masks_dir / vig_filename
+        depth_path = self.masks_dir / depth_filename
+
         vig_mask = None
         depth_mask = None
-        
+        missing_files = []
+
         if vig_path.exists():
             vig_img = cv2.imread(str(vig_path), cv2.IMREAD_GRAYSCALE)
             if vig_img is not None:
                 if config.ROTATE_IMAGES_TO_VERTICAL and camera_name in ["left", "right"]:
-                    # Only rotate if the mask on disk is still in the old horizontal format
                     if vig_img.shape[0] < vig_img.shape[1]:
                         is_cw = (camera_name == "right")
                         vig_img = cv2.rotate(vig_img, cv2.ROTATE_90_CLOCKWISE if is_cw else cv2.ROTATE_90_COUNTERCLOCKWISE)
                 vig_mask = cv2.resize(vig_img, (w, h), interpolation=cv2.INTER_NEAREST) > 0
-                
+        else:
+            missing_files.append(vig_filename)
+
         if depth_path.exists():
             depth_img = cv2.imread(str(depth_path), cv2.IMREAD_GRAYSCALE)
             if depth_img is not None:
                 if config.ROTATE_IMAGES_TO_VERTICAL and camera_name in ["left", "right"]:
-                    # Only rotate if the mask on disk is still in the old horizontal format
                     if depth_img.shape[0] < depth_img.shape[1]:
                         is_cw = (camera_name == "right")
                         depth_img = cv2.rotate(depth_img, cv2.ROTATE_90_CLOCKWISE if is_cw else cv2.ROTATE_90_COUNTERCLOCKWISE)
                 depth_mask = cv2.resize(depth_img, (w, h), interpolation=cv2.INTER_NEAREST) > 0
-                
-        self.masks_cache[key] = (vig_mask, depth_mask)
+        else:
+            missing_files.append(depth_filename)
+
+        if missing_files:
+            self._warn_missing_masks(camera_name, norm_lidar_name, missing_files)
+
+        res_vig = vig_mask if vig_mask is not None else (np.ones((h, w), dtype=bool) if fallback_to_ones else None)
+        res_depth = depth_mask if depth_mask is not None else (np.ones((h, w), dtype=bool) if fallback_to_ones else None)
+
+        self.masks_cache[key] = (res_vig, res_depth)
         return self.masks_cache[key]
 
-    def get_combined_mask(self, camera_name, lidar_name, shape):
+    def get_combined_mask(self, camera_name, lidar_name, shape, fallback_to_ones=False):
         """
         Returns the logical AND of the vignette mask and the depth mask.
-        If neither exist, returns None.
+        If neither exist, returns None (or np.ones((h, w), dtype=bool) if fallback_to_ones is True).
         If only one exists, returns that one.
         """
-        vig_mask, depth_mask = self.get_masks(camera_name, lidar_name, shape)
+        vig_mask, depth_mask = self.get_masks(camera_name, lidar_name, shape, fallback_to_ones=False)
         if vig_mask is not None and depth_mask is not None:
             return vig_mask & depth_mask
         elif vig_mask is not None:
             return vig_mask
         elif depth_mask is not None:
             return depth_mask
+        elif fallback_to_ones:
+            h, w = shape[:2]
+            return np.ones((h, w), dtype=bool)
         return None
 
 _GLOBAL_MASK_MANAGER = ValidityMaskManager()

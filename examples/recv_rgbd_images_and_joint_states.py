@@ -79,7 +79,8 @@ def main():
     try:
         while True:
             output_dict = socket.recv_pyobj()
-            frame = RGBDFrame.from_dict(output_dict)
+            from stretch4_emulated_rgbd.shared_utils import MultiRGBDFrame
+            multi_frame = MultiRGBDFrame.from_dict(output_dict)
             
             if mask_manager is None:
                 robot_id = output_dict.get('robot_id')
@@ -93,18 +94,14 @@ def main():
             closest_joint_state = output_dict.get('closest_joint_state', None)
             
             frames_received += 1
-            img_seq = frame.image_frame.frame_number
-            if img_seq is not None:
-                if last_seq_num is not None:
-                    dropped = img_seq - last_seq_num - 1
-                    if dropped > 0:
-                        dropped_messages += dropped
-                last_seq_num = img_seq
-                
+            
+            # Use timestamp from multi_frame if available
+            msg_ts = multi_frame.timestamp if multi_frame.timestamp else time.monotonic()
+
             # Log Joint States
             if closest_joint_state is not None:
                 # Log to rerun telemetry
-                rr.set_time("timestamp", timestamp=closest_joint_state['monotonic_timestamp'])
+                rr.set_time("timestamp", timestamp=msg_ts)
                 
                 rr.log("Telemetry/LiftArm/Lift", rr.Scalars(closest_joint_state['lift']['height']))
                 rr.log("Telemetry/LiftArm/Arm", rr.Scalars(closest_joint_state['arm']['extension']))
@@ -113,13 +110,29 @@ def main():
                 rr.log("Telemetry/Wrist/Yaw", rr.Scalars(closest_joint_state['wrist_yaw']['angle']))
                 rr.log("Telemetry/Wrist/Pitch", rr.Scalars(closest_joint_state['wrist_pitch']['angle']))
                 rr.log("Telemetry/Wrist/Roll", rr.Scalars(closest_joint_state['wrist_roll']['angle']))
+
               
             # Log RGB-D Frames
-            c_name = frame.camera_type
-            lidar_str = frame.lidars_used if frame.lidars_used else "no_lidar"
-            
-            vig_mask, depth_mask = mask_manager.get_masks(c_name, lidar_str, frame.image.shape)
-            visualize_rgbd_frame(c_name, frame, vig_mask=vig_mask, depth_mask=depth_mask)
+            frames = []
+            if multi_frame.left: frames.append(multi_frame.left)
+            if multi_frame.right: frames.append(multi_frame.right)
+            if multi_frame.center: frames.append(multi_frame.center)
+
+            for frame in frames:
+                img_seq = frame.image_frame.frame_number
+                if img_seq is not None:
+                    if last_seq_num is not None:
+                        dropped = img_seq - last_seq_num - 1
+                        if dropped > 0:
+                            dropped_messages += dropped
+                    last_seq_num = img_seq
+                    
+                c_name = frame.camera_type
+                lidar_str = getattr(frame, 'lidars_used', 'no_lidar')
+                
+                vig_mask, depth_mask = mask_manager.get_masks(c_name, lidar_str, frame.image.shape)
+                visualize_rgbd_frame(c_name, frame, vig_mask=vig_mask, depth_mask=depth_mask)
+
             
             # Print stats
             current_time = time.time()

@@ -75,6 +75,7 @@ To capture using the right camera and right LiDAR:
 ```bash
 python3 scripts/capture_emulated_rgbd.py --camera right --lidar right
 ```
+
 *(Note: This must be run on the Stretch 4 robot. It requires `stretch4_body` and the use of the robot's cameras and LiDARs)*
 
 ### 2. Preprocessing
@@ -149,6 +150,11 @@ To capture the live frames and estimate the masks for the right sensor pair:
 ```bash
 python3 scripts/estimate_validity_masks.py --camera right --lidar right
 ```
+
+To capture and estimate masks for both sides simultaneously:
+```bash
+python3 scripts/estimate_validity_masks.py --camera left_right --lidar both
+```
 *(Note: This must be run on the Stretch 4 robot. The script captures exactly 30 synchronized frames, computes the masks at the highest active resolution, and saves them locally to `data/validity_masks/` for the visualizers to use automatically).*
 
 ### 8. Visualize Live RGB-D Imagery with the New Calibration (On Robot)
@@ -164,32 +170,37 @@ For the right camera/lidar:
 python3 scripts/visualize_emulated_rgbd.py --camera right --lidar right
 ```
 
+For both cameras and lidars simultaneously:
+```bash
+python3 scripts/visualize_emulated_rgbd.py --camera left_right --lidar both
+```
+
 ### 10. Use PyZMQ to Send RGB-D Imagery
 
 There are two examples of sending RGB-D images via PyZMQ. They can be used to send RGB-D images from the robot to a desktop computer or between processes on the same computer.
 
 The first example sends RGB-D images, receives them, and then visualizes them using OpenCV. 
 
-To run the publisher:
+To run the publisher (e.g. for both cameras):
 ```bash
-python3 scripts/send_rgbd_images.py --camera left --lidar left
+python3 examples/send_rgbd_images.py --camera left_right --lidar both
 ```
 
 To run the subscriber:
 ```bash
-python3 scripts/recv_rgbd_images.py
+python3 examples/recv_rgbd_images.py
 ```
 
 The second example send RGB-D images with the synchronized joint state of the robot, receives them, and then visualizes the colored 3D point cloud in Rerun along with the joint states.
 
-To run the publisher:
+To run the publisher (e.g. for both cameras):
 ```bash
-python3 scripts/send_rgbd_images_and_joint_states.py --camera left --lidar left
+python3 examples/send_rgbd_images_and_joint_states.py --camera left_right --lidar both
 ```
 
 To run the subscriber:
 ```bash
-python3 scripts/recv_rgbd_images_and_joint_states.py
+python3 examples/recv_rgbd_images_and_joint_states.py
 ```
 
 Both examples can send data over the network. To do so, you will need to use the `--remote` flag for both the publisher and the subscriber and provide IP and port information. Sending RGB-D images with joint states uses the following file for IP and port information:
@@ -203,7 +214,8 @@ The example code for sending RGB-D images alone uses IP and port information pro
 For developers writing custom applications, the repository provides a unified API in `stretch4_emulated_rgbd.api` to stream and process synchronized RGB-D frames.
 
 > [!TIP]
-> **Quick Start:** For a complete, runnable demonstration of the API capabilities—including lazy properties, calibration extraction, validity masking, dense depth interpolation, and colored 3D point cloud generation—see [`examples/api_example.py`](file:///home/hello-robot/repos/stretch4_emulated_rgbd/examples/api_example.py).
+> **Quick Start:** For a complete, runnable demonstration of the API capabilities—including lazy properties, calibration extraction, validity masking, dense depth interpolation, and colored 3D point cloud generation—see [`examples/api_example.py`](file:///home/hello-robot/repos/stretch4_rgbd/examples/api_example.py). 
+> **WARNING** The Rerun visualization used with the script has two notable issues: 1. The left and right RGB-D images are displayed in the same panel. To visualize one of them, you can hide the overlayed images from the other. 2. The middle 3D point cloud shows the result of generating a point cloud from every depth point in the dense depth image, which uses interpolation. Currently, this results in substantial artifacts due to some of the interpolated depth points being invalid.
 
 #### Summary of Processing Steps
 When the `FastEmulatedRGBDStreamer` captures and aligns an RGB-D frame, it executes the following steps internally *before* yielding it to you:
@@ -218,19 +230,22 @@ When the `FastEmulatedRGBDStreamer` captures and aligns an RGB-D frame, it execu
 
 #### Code Examples
 
-**Receiving the Stream**
+**Receiving the Stream (Simultaneous Left and Right)**
 ```python
 from stretch4_emulated_rgbd.api import get_emulated_rgbd_stream
 
-# Automatically loads the optimized calibration for the current fleet
+# Automatically loads the optimized calibrations for the current fleet
 streamer, generator = get_emulated_rgbd_stream(
-    use_left=True, 
+    use_left_right=True, 
     use_left_lidar=True,
+    use_right_lidar=True,
     emulated_rgbd_fps=10.0
 )
 
-# Fetch a single synchronized frame
-frame = next(generator)
+# Fetch synchronized frames from both cameras
+multi_frame = next(generator)
+left_frame = multi_frame.left
+right_frame = multi_frame.right
 ```
 
 **Applying Validity Masks**
@@ -240,12 +255,13 @@ import cv2
 
 mask_manager = ValidityMaskManager()
 # Automatically loads the robot's physical vignetting and LiDAR bounds masks
-vig_mask, depth_mask = mask_manager.get_masks("left", "left_lidar", frame.image.shape)
+vig_mask, depth_mask = mask_manager.get_masks("left", "left_lidar right_lidar", left_frame.image.shape)
 
 # Apply vignette mask to black out the physical camera housing
-masked_rgb = frame.image.copy()
+masked_rgb = left_frame.image.copy()
 masked_rgb[~vig_mask] = 0
 ```
+
 
 **Generating a Dense Depth Image**
 ```python

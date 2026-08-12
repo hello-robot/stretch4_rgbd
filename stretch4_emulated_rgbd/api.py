@@ -67,42 +67,61 @@ def get_emulated_rgbd_stream(
     compress=True,
     oak_buffer_size=1,
     calibration: ExtrinsicsCalibration = None,
-    ignore_prior_optimizations=False
+    ignore_prior_optimizations=False,
+    merge_lidars=False
 ):
     """
     Unified entry point to stream synchronized RGB-D frames from Stretch 4.
     Automatically selects the FastEmulatedRGBDStreamer if only the left camera and 
     left LiDAR are requested. Otherwise falls back to the standard stretch4_body streamer.
     
+    Args:
+        ... (existing args) ...
+        merge_lidars (bool): If True, merges points from both LiDARs for each camera.
+                             If False (default), associates left camera with left LiDAR 
+                             and right camera with right LiDAR for performance.
+    
     Returns:
         (streamer, generator): The streamer instance and the generator yielding RGBDFrames.
     """
+
     
     use_both_lidars_default = not (use_left_lidar or use_right_lidar)
     if use_both_lidars_default:
         use_left_lidar = True
         use_right_lidar = True
 
-    # Use fast streamer for the optimal cases: left camera + left lidar, OR right camera + right lidar
-    is_left_only = use_left and not use_right and not use_center and not use_left_right and not use_left_right_center and use_left_lidar and not use_right_lidar
-    is_right_only = use_right and not use_left and not use_center and not use_left_right and not use_left_right_center and use_right_lidar and not use_left_lidar
+    # Use fast streamer for head cameras (left and/or right) + lidars
+    use_head_only = (use_left or use_right or use_left_right) and not (use_center or use_left_right_center)
+    
+    if use_head_only:
+        camera_names = []
+        if use_left or use_left_right: camera_names.append("left")
+        if use_right or use_left_right: camera_names.append("right")
+        
+        # Ensure unique names
+        camera_names = list(dict.fromkeys(camera_names))
 
-    if is_left_only or is_right_only:
-        camera_name = "left" if is_left_only else "right"
-        lidar_name = "left" if is_left_only else "right"
+        lidar_names = []
+        if use_left_lidar: lidar_names.append("left")
+        if use_right_lidar: lidar_names.append("right")
+        
         from stretch4_emulated_rgbd.fast_emulated_rgbd import FastEmulatedRGBDStreamer
         streamer = FastEmulatedRGBDStreamer(
-            camera=camera_name,
-            lidar=lidar_name,
+            camera=camera_names,
+            lidar=lidar_names,
             emulated_rgbd_fps=emulated_rgbd_fps, 
             camera_fps=camera_fps,
             resolution_height=resolution_height, 
             compress=compress, 
             oak_buffer_size=oak_buffer_size,
             calibration=calibration,
-            ignore_prior_optimizations=ignore_prior_optimizations
+            ignore_prior_optimizations=ignore_prior_optimizations,
+            merge_lidars=merge_lidars
         )
+
         return streamer, streamer.stream_rgbd()
+
 
     if not HAS_STRETCH_BODY:
         raise RuntimeError("stretch4_body is not installed. Live streaming fallback is not available. Try selecting only left camera and left lidar.")
@@ -198,16 +217,18 @@ def get_emulated_rgbd_stream(
                 f.timestamp_lidar_right = None
 
         for frame in gen:
-            # If frame is a dictionary/namespace for multiple cameras:
+            # Check if it's a single frame
             if hasattr(frame, 'camera_type'):
                 _process_frame(frame, frame.camera_type)
                 yield frame
             else:
+                # It's a multi-frame object (MultiRGBDFrame or namespace)
                 for c_name in ["left", "right", "center"]:
                     sub_frame = getattr(frame, c_name, None)
                     if sub_frame:
                         _process_frame(sub_frame, c_name)
                 yield frame
+
 
     return streamer, _inject_transforms(gen, streamer)
 

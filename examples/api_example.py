@@ -45,8 +45,10 @@ def main():
         camera_fps=args.camera_fps,
         resolution_height=args.resolution,
         compress=not args.disable_compression,
-        oak_buffer_size=args.oak_buffer_size
+        oak_buffer_size=args.oak_buffer_size,
+        merge_lidars=args.merge_lidars
     )
+
 
     # 2. Initialize the Validity Mask Manager
     print("\n[2] Initializing Validity Mask Manager...")
@@ -63,125 +65,135 @@ def main():
         rerun_initialized = False
 
         # The generator yields synchronized frames indefinitely
-        for frame in generator:
-            if frame is None:
+        for frame_data in generator:
+            if frame_data is None:
                 continue
                 
-            # 4. Access Lazy Properties
-            rgb_image = frame.image
-            depth_image = frame.depth_image
-            
-            # 5. Access Calibration Data
-            cam_matrix = frame.camera_matrix
-            dist_coeffs = frame.distortion_coefficients
-            T_base_to_cam = frame.T_base_to_cam
-            
-            # 6. Apply Validity Masks
-            c_name = frame.camera_type
-            lidar_str = frame.lidars_used if frame.lidars_used else "no_lidar"
-            vig_mask, lidar_mask = mask_manager.get_masks(c_name, lidar_str, rgb_image.shape)
-            
-            if False:
-                # Combine the masks and ERODE them slightly. 
-                # Eroding shrinks the mask inward by a few pixels. This elegantly drops the extreme 
-                # boundary pixels of the fisheye lens BEFORE unprojection, preventing the tan(theta) explosion.
-                combined_mask = vig_mask & lidar_mask
-                erosion_kernel = np.ones((5, 5), np.uint8)
-                dense_depth_validity_mask = cv2.erode(combined_mask.astype(np.uint8), erosion_kernel, iterations=12).astype(bool)
-            else: 
-                dense_depth_validity_mask = vig_mask & lidar_mask
-            
-            # Apply the vignetting mask to remove invalid fisheye edges from the RGB image
-            masked_rgb = rgb_image.copy()
-            masked_rgb[~vig_mask] = 0
-            
-            # 7. Generate Dense Depth Map
-            dense_processor = DenseDepthImage(rgb_image, depth_image, apply_validity_mask=False)
-            dense_depth = dense_processor.compute_dense_depth()
-            
-            # Before creating a point cloud, apply the eroded combined mask to drop unstable boundary pixels
-            dense_depth[~dense_depth_validity_mask] = 0
-            
-            # 8. Create Colored Point Cloud
-            pts_cam, colors = create_point_cloud_from_depth(
-                dense_depth, masked_rgb, cam_matrix, dist_coeffs
-            )
-            
-            # Transform points to the robot's base coordinate frame for correct upright 3D viewing
-            pts_cam_homog = np.hstack((pts_cam, np.ones((pts_cam.shape[0], 1))))
-            T_cam_to_base = np.linalg.inv(T_base_to_cam)
-            pts_base = (T_cam_to_base @ pts_cam_homog.T).T[:, :3]
+            # Handle both single frames and multi-frame objects
+            frames = []
+            if hasattr(frame_data, "left") or hasattr(frame_data, "right") or hasattr(frame_data, "center"):
+                if getattr(frame_data, "left", None): frames.append(frame_data.left)
+                if getattr(frame_data, "right", None): frames.append(frame_data.right)
+                if getattr(frame_data, "center", None): frames.append(frame_data.center)
+            else:
+                frames.append(frame_data)
 
-            # 9. Visualization
-            if not rerun_mode:
-                # 9a. OpenCV Visualization
-                # Normalize depth for visualization (cap at 5 meters for better contrast)
-                max_depth = 5.0
-                depth_vis = np.clip(dense_depth, 0, max_depth) / max_depth
-                depth_vis = (depth_vis * 255).astype(np.uint8)
-                depth_colormap = cv2.applyColorMap(depth_vis, cv2.COLORMAP_JET)
-                # Set invalid depth (0) to black
-                depth_colormap[dense_depth == 0] = [0, 0, 0]
+            # For visualization stacking
+            all_rgb_masked = []
+            all_depth_vis = []
+
+            for frame in frames:
+                # 4. Access Lazy Properties
+                rgb_image = frame.image
+                depth_image = frame.depth_image
                 
-                cv2.imshow("Masked RGB", masked_rgb)
-                cv2.imshow("Dense Depth", depth_colormap)
+                # 5. Access Calibration Data
+                cam_matrix = frame.camera_matrix
+                dist_coeffs = frame.distortion_coefficients
+                T_base_to_cam = frame.T_base_to_cam
+                
+                # 6. Apply Validity Masks
+                c_name = frame.camera_type
+                lidar_str = frame.lidars_used if frame.lidars_used else "no_lidar"
+                vig_mask, lidar_mask = mask_manager.get_masks(c_name, lidar_str, rgb_image.shape, fallback_to_ones=True)
+                
+                dense_depth_validity_mask = vig_mask & lidar_mask
+                
+                # Apply the vignetting mask to remove invalid fisheye edges from the RGB image
+                masked_rgb = rgb_image.copy()
+                masked_rgb[~vig_mask] = 0
+                
+                # 7. Generate Dense Depth Map
+                dense_processor = DenseDepthImage(rgb_image, depth_image, apply_validity_mask=False)
+                dense_depth = dense_processor.compute_dense_depth()
+                if dense_depth is None:
+                    dense_depth = np.zeros(rgb_image.shape[:2], dtype=np.float32)
+                
+                # Before creating a point cloud, apply the eroded combined mask to drop unstable boundary pixels
+                dense_depth[~dense_depth_validity_mask] = 0
+                
+                # 8. Create Colored Point Cloud
+                pts_cam, colors = create_point_cloud_from_depth(
+                    dense_depth, masked_rgb, cam_matrix, dist_coeffs
+                )
+                
+                # Transform points to the robot's base coordinate frame for correct upright 3D viewing
+                pts_cam_homog = np.hstack((pts_cam, np.ones((pts_cam.shape[0], 1))))
+                T_cam_to_base = np.linalg.inv(T_base_to_cam)
+                pts_base = (T_cam_to_base @ pts_cam_homog.T).T[:, :3]
+
+                # 9. Visualization
+                if not rerun_mode:
+                    # 9a. OpenCV Visualization
+                    max_depth = 5.0
+                    depth_vis = np.clip(dense_depth, 0, max_depth) / max_depth
+                    depth_vis = (depth_vis * 255).astype(np.uint8)
+                    depth_colormap = cv2.applyColorMap(depth_vis, cv2.COLORMAP_JET)
+                    depth_colormap[dense_depth == 0] = [0, 0, 0]
+                    
+                    all_rgb_masked.append(masked_rgb)
+                    all_depth_vis.append(depth_colormap)
+                else:
+                    # 9b. Rerun Visualization
+                    if not rerun_initialized:
+                        try:
+                            import rerun as rr
+                            import rerun.blueprint as rrb
+                            print("    -> Spawning Rerun viewer...")
+                            rr.init("api_example_visualization", spawn=True)
+                            
+                            blueprint = rrb.Blueprint(
+                                rrb.Horizontal(
+                                    rrb.Spatial3DView(name="Sparse Point Cloud", origin="sparse_view"),
+                                    rrb.Spatial3DView(name="Dense Point Cloud", origin="dense_view"),
+                                    rrb.Spatial2DView(name="Layered RGB-D", origin="camera"),
+                                ),
+                                rrb.BlueprintPanel(expanded=False),
+                                rrb.SelectionPanel(expanded=True),
+                                rrb.TimePanel(expanded=False, play_state="following"),
+                            )
+                            rr.send_blueprint(blueprint)
+                            rerun_initialized = True
+                        except ImportError:
+                            print("    -> Rerun is not installed. Exiting.")
+                            break
+                    
+                    # Prefix paths with camera name for multi-camera support in Rerun
+                    prefix = f"camera/{c_name}/"
+                    rr.log(prefix + "rgb", rr.Image(masked_rgb[:, :, ::-1])) 
+                    rr.log(prefix + "dense_depth", rr.DepthImage(dense_depth, meter=1.0, depth_range=[0.0, config.RERUN_COLOR_MAX_DEPTH_M]))
+                    rr.log(prefix + "sparse_depth", rr.DepthImage(depth_image, meter=1.0, depth_range=[0.0, config.RERUN_COLOR_MAX_DEPTH_M]))
+                    
+                    rr.log(
+                        f"sparse_view/{c_name}/point_cloud", 
+                        rr.Points3D(frame.point_cloud_base, colors=frame.point_colors, radii=[0.01]) 
+                    )
+                    rr.log(
+                        f"dense_view/{c_name}/point_cloud", 
+                        rr.Points3D(pts_base, colors=colors[:, ::-1], radii=[0.01]) 
+                    )
+
+            if not rerun_mode and all_rgb_masked:
+                # Tile images if there are multiple
+                stacked_rgb = np.hstack(all_rgb_masked)
+                stacked_depth = np.hstack(all_depth_vis)
+                cv2.imshow("Masked RGB", stacked_rgb)
+                cv2.imshow("Dense Depth", stacked_depth)
                 
                 key = cv2.waitKey(1) & 0xFF
-                if key == ord('q') or key == 27: # 27 is ESC
+                if key == ord('q') or key == 27:
                     rerun_mode = True
                     cv2.destroyAllWindows()
                     print("\n[9b] Switching to Rerun Visualization (press Ctrl+C to exit)...")
-            else:
-                # 9b. Rerun Visualization
-                if not rerun_initialized:
-                    try:
-                        import rerun as rr
-                        import rerun.blueprint as rrb
-                        print("    -> Spawning Rerun viewer...")
-                        rr.init("api_example_visualization", spawn=True)
-                        
-                        # Explicitly define the layout blueprint to force stacking of the 2D images
-                        # under the 'camera' origin, while keeping the 3D views separate.
-                        blueprint = rrb.Blueprint(
-                            rrb.Horizontal(
-                                rrb.Spatial3DView(name="Sparse Point Cloud", origin="sparse_view"),
-                                rrb.Spatial3DView(name="Dense Point Cloud", origin="dense_view"),
-                                rrb.Spatial2DView(name="Layered RGB-D", origin="camera"),
-                            ),
-                            rrb.BlueprintPanel(expanded=False),
-                            rrb.SelectionPanel(expanded=True),
-                            rrb.TimePanel(expanded=False, play_state="following"),
-                        )
-                        rr.send_blueprint(blueprint)
-                        rerun_initialized = True
-                    except ImportError:
-                        print("    -> Rerun is not installed. Exiting.")
-                        break
-                        
-                # Log the images (OpenCV uses BGR, Rerun expects RGB)
-                rr.log("camera/rgb", rr.Image(masked_rgb[:, :, ::-1])) 
-                rr.log("camera/dense_depth", rr.DepthImage(dense_depth, meter=1.0, depth_range=[0.0, config.RERUN_COLOR_MAX_DEPTH_M]))
-                
-                # Add the sparse depth image overlay as requested
-                rr.log("camera/sparse_depth", rr.DepthImage(depth_image, meter=1.0, depth_range=[0.0, config.RERUN_COLOR_MAX_DEPTH_M]))
-                
-                # Log the perfectly aligned SPARSE point cloud directly from the API.
-                # Logged to a separate root path ("sparse_view") to force a side-by-side window in Rerun
-                rr.log(
-                    "sparse_view/point_cloud", 
-                    rr.Points3D(frame.point_cloud_base, colors=frame.point_colors, radii=[0.01]) 
-                )
-                
-                # Log the perfectly aligned DENSE point cloud generated from the depth map.
-                # Logged to a separate root path ("dense_view") to force a side-by-side window in Rerun
-                rr.log(
-                    "dense_view/point_cloud", 
-                    rr.Points3D(pts_base, colors=colors[:, ::-1], radii=[0.01]) 
-                )
+
         
     finally:
         print("\nStopping streamer...")
         streamer.stop()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        pass
+    os._exit(0)

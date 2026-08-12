@@ -40,11 +40,13 @@ def main():
     last_print_time = time.time()
     frames_received = 0
     mask_manager = None
+    opened_windows = set()
     
     try:
         while True:
             output_dict = socket.recv_pyobj()
-            frame = RGBDFrame.from_dict(output_dict)
+            from stretch4_emulated_rgbd.shared_utils import MultiRGBDFrame
+            multi_frame = MultiRGBDFrame.from_dict(output_dict)
             frames_received += 1
             
             if mask_manager is None:
@@ -56,36 +58,61 @@ def main():
                 else:
                     mask_manager = ValidityMaskManager()
             
-            # Access the cleanly aligned, decompressed, and rotated image 
-            # simply by calling frame.image (handled transparently by RGBDFrame)
-            color_image = frame.image
-            depth_image = frame.depth_image
-            
-            c_name = getattr(frame, 'camera_type', 'left')
-            lidar_str = getattr(frame, 'lidars_used', 'no_lidar')
-            if not lidar_str:
-                lidar_str = "no_lidar"
+            # Extract all active frames
+            frames = []
+            if multi_frame.left: frames.append(multi_frame.left)
+            if multi_frame.right: frames.append(multi_frame.right)
+            if multi_frame.center: frames.append(multi_frame.center)
+
+            active_windows = set()
+
+            for frame in frames:
+                # Access the cleanly aligned, decompressed, and rotated image 
+                # simply by calling frame.image (handled transparently by RGBDFrame)
+                color_image = frame.image
+                depth_image = frame.depth_image
                 
-            shape = color_image.shape if color_image is not None else (depth_image.shape if depth_image is not None else (0,0))
-            if shape != (0,0):
-                vig_mask, depth_mask = mask_manager.get_masks(c_name, lidar_str, shape)
+                c_name = frame.camera_type
+                lidar_str = getattr(frame, 'lidars_used', 'no_lidar')
+                if not lidar_str:
+                    lidar_str = "no_lidar"
                 
-                if color_image is not None and vig_mask is not None:
-                    color_image[~vig_mask] = 0
+                shape = color_image.shape if color_image is not None else (depth_image.shape if depth_image is not None else (0,0))
+                if shape != (0,0):
+                    vig_mask, depth_mask = mask_manager.get_masks(c_name, lidar_str, shape)
                     
-                if depth_image is not None and depth_mask is not None:
-                    depth_image[~depth_mask] = 0
-            
-            # Show RGB
-            if color_image is not None:
-                cv2.namedWindow("RGB Stream", cv2.WINDOW_NORMAL)
-                cv2.imshow("RGB Stream", color_image)
+                    if color_image is not None and vig_mask is not None:
+                        color_image[~vig_mask] = 0
+                        
+                    if depth_image is not None and depth_mask is not None:
+                        depth_image[~depth_mask] = 0
                 
-            # Show Depth
-            if depth_image is not None:
-                depth_vis = apply_color_map(depth_image)
-                cv2.namedWindow("Depth Stream", cv2.WINDOW_NORMAL)
-                cv2.imshow("Depth Stream", depth_vis)
+                # Show RGB
+                if color_image is not None:
+                    win_name = f"RGB Stream ({c_name})"
+                    cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+                    cv2.imshow(win_name, color_image)
+                    active_windows.add(win_name)
+                    opened_windows.add(win_name)
+                    
+                # Show Depth
+                if depth_image is not None and np.any(depth_image > 0):
+                    depth_vis = apply_color_map(depth_image)
+                    win_name = f"Depth Stream ({c_name} - {lidar_str})"
+                    cv2.namedWindow(win_name, cv2.WINDOW_NORMAL)
+                    cv2.imshow(win_name, depth_vis)
+                    active_windows.add(win_name)
+                    opened_windows.add(win_name)
+
+            # Destroy windows that are no longer active
+            for win_name in list(opened_windows):
+                if win_name not in active_windows:
+                    try:
+                        cv2.destroyWindow(win_name)
+                    except cv2.error:
+                        pass
+                    opened_windows.remove(win_name)
+
                 
             key = cv2.waitKey(1)
             if key in (27, ord('q')):

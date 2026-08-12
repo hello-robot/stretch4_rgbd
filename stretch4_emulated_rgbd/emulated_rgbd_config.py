@@ -110,7 +110,7 @@ ENABLE_SHADOW_FILTER = True
 # The size of the local neighborhood window (in pixels) to search for closer foreground points.
 # Larger windows handle greater sparsity but may erroneously remove points seen through real gaps.
 # Must be an odd integer (e.g., 3, 5, 7).
-SHADOW_FILTER_WINDOW_SIZE = 13 #5 #7 #11 #13 #15 #17
+SHADOW_FILTER_WINDOW_SIZE = 7 #13 #5 #7 #11 #13 #15 #17
 
 # The depth difference threshold (in meters) to consider a point "shadowed" by a foreground point.
 # If a neighbor is closer by more than this threshold, the background point is removed.
@@ -133,7 +133,8 @@ OPTIMIZE_EXTRINSICS_SHADOW_FILTER_DEPTH_THRESHOLD_M = 0.3
 # A circular window provides more isotropic filtering and reduces blocky artifacts around edges,
 # which can be advantageous when using larger window sizes (e.g., >= 5).
 # Note: Circular kernels are non-separable and introduce latency, so they are disabled by default.
-SHADOW_FILTER_USE_CIRCULAR_WINDOW = True
+SHADOW_FILTER_USE_CIRCULAR_WINDOW = False #True
+
 
 # ==============================================================================
 # VISUALIZATION & DENSE RGB-D OVERLAY

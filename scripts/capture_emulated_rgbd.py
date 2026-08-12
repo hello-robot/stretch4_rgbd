@@ -35,15 +35,18 @@ def save_captured_data(capture_dir, seq_num, args, synced_frames, streamer):
     frames_to_save = []
     # If not using left_right or left_right_center, synced_frames is just a single RGBDFrame
     # We standardise it to a list of tuples: (camera_name, frame)
-    if hasattr(synced_frames, "left"): # SyncedRGBDFrame
-        if synced_frames.left is not None: frames_to_save.append(("left", synced_frames.left))
-        if synced_frames.right is not None: frames_to_save.append(("right", synced_frames.right))
+    if hasattr(synced_frames, "left") or hasattr(synced_frames, "right") or hasattr(synced_frames, "center"):
+        if getattr(synced_frames, "left", None) is not None: frames_to_save.append(("left", synced_frames.left))
+        if getattr(synced_frames, "right", None) is not None: frames_to_save.append(("right", synced_frames.right))
         if getattr(synced_frames, "center", None) is not None: frames_to_save.append(("center", synced_frames.center))
     else:
         # single frame
         if synced_frames is not None:
-            camera_name = args.camera if args.camera in ["left", "right", "center"] else "center"
+            camera_name = getattr(synced_frames, 'camera_type', args.camera)
+            if camera_name not in ["left", "right", "center"]:
+                camera_name = "center"
             frames_to_save.append((camera_name, synced_frames))
+
             
     for c_name, frame in frames_to_save:
         if frame is None: continue
@@ -116,8 +119,10 @@ def main():
         use_left_right_center=use_left_right_center,
         use_left_lidar=use_left_lidar,
         use_right_lidar=use_right_lidar,
-        ignore_prior_optimizations=args.ignore_prior_optimizations
+        ignore_prior_optimizations=args.ignore_prior_optimizations,
+        merge_lidars=args.merge_lidars
     )
+
 
     input_listener = NonBlockingInput()
     seq_num = 1
