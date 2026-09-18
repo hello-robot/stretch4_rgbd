@@ -50,7 +50,7 @@ class FastEmulatedRGBDStreamer:
             raise RuntimeError("HELLO_FLEET_PATH or HELLO_FLEET_ID environment variables are missing.")
 
         # Load LiDAR calibration
-        from stretch4_body.subsystem.cameras.calibrate_extrinsics_lidars import DualLidarCalibration
+        from stretch4_emulated_rgbd.dual_lidar_calibration import DualLidarCalibration
         self.lidar_calib = DualLidarCalibration()
         self.T_lidar_to_base_left = self.lidar_calib.get_lidar_to_base_transform(is_right_lidar=False)
         self.T_lidar_to_base_right = self.lidar_calib.get_lidar_to_base_transform(is_right_lidar=True)
